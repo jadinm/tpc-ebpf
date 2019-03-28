@@ -5,6 +5,9 @@ Goals:
 - Detect heavy-hitters on the end-host (accounting and classification)
 - Push SRH to steer heavy-hitters through different paths (steering)
 - Leverage eBPF for all of the above (flexibility)
+- Improve transport protocols (TCP, QUIC, MPTCP...) by using SRv6 (using SRv6
+  to steer flow away from inefficient path)
+
 
 Non-goals:
 - Traffic shaping (simply use fq_codel)
@@ -61,3 +64,15 @@ The following design choices can avoid performance losses:
 - If we use LWT_XMIT instead of LWT_OUT, we do not need to do an additional route lookup. The encapsulated packet
   will be delivered to the original next-hop selected based on the inner header DA. This is perfectly fine on an
   end-host scenario.
+
+5. CURRENT LIMITATIONS OF THE LINUX IMPLEMENTATION
+==================================================
+
+- The cgroup/skb program type doesn't allow to modify the skb->sk, so it can only be used for accounting
+- The cgroup/sock program type allow modification on the sk, but can't be attached on the egress path
+
+6. CURRENT IDEAS
+================
+
+- Encap in LW
+- Find a way to do the setsockopt (difficult because the socket isn't locked)
