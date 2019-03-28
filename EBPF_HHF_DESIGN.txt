@@ -1,0 +1,63 @@
+1. PAPER GOALS
+==============
+
+Goals:
+- Detect heavy-hitters on the end-host (accounting and classification)
+- Push SRH to steer heavy-hitters through different paths (steering)
+- Leverage eBPF for all of the above (flexibility)
+
+Non-goals:
+- Traffic shaping (simply use fq_codel)
+- Low latency
+
+2. KERNEL SUPPORT
+=================
+
+2.1. Flow accounting
+--------------------
+
+One eBPF program on egress path, program type CGROUP_SKB, attach type CGROUP_INET_EGRESS.
+Per-flow accounting in BPF map.
+
+2.2. SRH encapsulation
+----------------------
+
+Internal function bpf_push_seg6_encap already implemented. Available through BPF helper
+bpf_lwt_in_push_encap. We cannot use it as we are in the output/xmit path rather than
+the input path. A helper bpf_lwt_xmit_push_encap exists but has no support for seg6
+encap. Adding support for seg6 encap to it should be trivial, O(10) LOC changes.
+
+SRH encapsulation program would be of type LWT_XMIT.
+
+Caveats:
+- Agnostic to cgroups
+- Must be attached to a route
+- Can be sharded per-namespace
+
+Need to reconcile per-cgroup flow accounting with per-namespace policy enforcement.
+Option: extend our CGROUP_SKB program to also mark the skb with a unique per-cgroup
+socket mark. Encapsulation program will fetch SRH from eBPF map with key (5-tuple, mark).
+
+2.3. Qdisc
+----------
+
+Traffic shaping is a non-goal but we want to have at least fairness between flows.
+We can simply use fq_codel for that.
+
+3. USERSPACE CONTROLLER
+=======================
+
+A userspace controller would periodically iterate over the flow accounting table (eBPF map),
+detect heavy hitters, and accordingly update the encapsulation eBPF map with appropriate SRHs.
+
+4. PERFORMANCES IMPLICATIONS
+============================
+
+The following items can impact the performances:
+- Encapsulation (memcpy).
+- For GSO skbs, gso_segs will be invalidated and recomputed in device layer. This adds a division in the fast path.
+
+The following design choices can avoid performance losses:
+- If we use LWT_XMIT instead of LWT_OUT, we do not need to do an additional route lookup. The encapsulated packet
+  will be delivered to the original next-hop selected based on the inner header DA. This is perfectly fine on an
+  end-host scenario.
