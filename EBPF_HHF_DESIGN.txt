@@ -1,3 +1,8 @@
+0. STORY
+========
+
+We need a nice problem-solving story !
+
 1. PAPER GOALS
 ==============
 
@@ -10,7 +15,7 @@ Goals:
 
 
 Non-goals:
-- Traffic shaping (simply use fq_codel)
+- Traffic shaping (simply use fq)
 - Low latency
 
 2. KERNEL SUPPORT
@@ -45,7 +50,13 @@ socket mark. Encapsulation program will fetch SRH from eBPF map with key (5-tupl
 ----------
 
 Traffic shaping is a non-goal but we want to have at least fairness between flows.
-We can simply use fq_codel for that.
+We can simply use fq for that. It will provide per-flow pacing. Shaping can be
+optionally realized through the per-qdisc "maxrate" option or at the discretion
+of the applcations through the SO_MAX_PACING_RATE socket option.
+
+Interestingly, sch_fq provides a ce_threshold parameter, calling INET_ECN_set_ce()
+for each skb whose actual xmit time exceeded its planned xmit time by more than ce_threshold
+nanoseconds. Not sure if we can make use of that somehow.
 
 3. USERSPACE CONTROLLER
 =======================
