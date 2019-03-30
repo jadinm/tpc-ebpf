@@ -3,6 +3,40 @@
 
 We need a nice problem-solving story !
 
+Scope: datacenter networks, heavy hitters, host-based traffic engineering
+
+	1. Heavy hitters are bad (in datacenter networks)
+		- Heavy-Hitter Detection Entirely in the Data Plane: https://dl.acm.org/citation.cfm?id=3063772
+		- other refs
+	2. Show gap in current techniques against heavy hitters (i.e. no TE at end host)
+		- refs
+	3. Make the case for TE at the host (more powerful solution)
+		- Talk about eBPF
+		- SRN paper (big advantage here: applications can be totally agnostic to SRv6 or even IPv6)
+		- Related: Carousel paper
+		- other refs
+	4. Extend technique to encompass reaction to TCP events
+		- React to CC events and/or ECN marking
+		- Benefits: can react to network congestion even if not detected by local HHF algo.
+			- Mild congestion through ECN markings
+			- Severe congestion or bad component on the path will induce CC events (e.g. RTO)
+		- refs
+	5. Implementation
+		- Explain our journey: from CGROUP_SKB to LWT_XMIT to SCHED_ACT to SCHED_ACT + SOCK_OPS
+		- CGROUP_SKB: read-only, filtering hook, per-cgroup
+		- LWT_XMIT: read-write, probably requires an additional namespace, route and intf dependent
+		- SCHED_ACT: most comprehensive write access, only intf dependent, will require a bridge or something to reduce MTU and to decouple accounting from policy enforcement
+		- SOCK_OPS: per-cgroup, reaction to TCP events
+	6. Evaluation
+		- Performances considerations
+			- Bridge traversal latency (vs veth traversal latency f.e.)
+			- Cost of calling eBPF program
+			- SRH encap cost (seg6_validate_srh() + seg6_do_srh_encap())
+				- If seg6_validate_srh() is very costly, maybe maintain per-CPU list of already-validated SRHs ?
+			- Adds a division in egress path due to gso_segs invalidated by SRH encap
+	7. Future work
+		- Show that this paper can be generalized to all TE scenarios, not just HH.
+
 1. PAPER GOALS
 ==============
 
@@ -63,6 +97,9 @@ nanoseconds. Not sure if we can make use of that somehow.
 
 A userspace controller would periodically iterate over the flow accounting table (eBPF map),
 detect heavy hitters, and accordingly update the encapsulation eBPF map with appropriate SRHs.
+
+For heavy hitters steering: two pools of SRH/BSIDs, one for HHs, one for non-HHs.
+For flow steering re congestion event: pool of disjoints SRH/BSIDs ?
 
 4. PERFORMANCES IMPLICATIONS
 ============================
