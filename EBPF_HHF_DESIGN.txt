@@ -7,6 +7,7 @@ Scope: datacenter networks, heavy hitters, host-based traffic engineering
 
 	1. Heavy hitters are bad (in datacenter networks)
 		- Heavy-Hitter Detection Entirely in the Data Plane: https://dl.acm.org/citation.cfm?id=3063772
+		- Segment Routing in Massively Scalaboe Data Center: https://www.nanog.org/sites/default/files/Bhattacharya_Segment.pdf
 		- other refs
 	2. Show gap in current techniques against heavy hitters (i.e. no TE at end host)
 		- refs
