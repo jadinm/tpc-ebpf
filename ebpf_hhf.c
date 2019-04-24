@@ -41,7 +41,7 @@ int handle_egress(struct __sk_buff *skb)
 	bpf_debug("egress skb spotted\n");
 	bpf_trace_printk(fmt, sizeof(fmt), sk->family, sk->type, sk->protocol);
 
-	return 0;
+	return 1;
 }
 
 char _license[] SEC("license") = "GPL";
