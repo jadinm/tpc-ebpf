@@ -12,6 +12,10 @@
 #include "kernel.h"
 #include "utils.h"
 
+#define htonll(x) ((bpf_htonl(1)) == 1 ? (x) : ((uint64_t)bpf_htonl((x) & \
+				0xFFFFFFFF) << 32) | bpf_htonl((x) >> 32))
+#define ntohll(x) ((bpf_ntohl(1)) == 1 ? (x) : ((uint64_t)bpf_ntohl((x) & \
+				0xFFFFFFFF) << 32) | bpf_ntohl((x) >> 32))
 
 SEC("sockops")
 int handle_sockop(struct bpf_sock_ops *skops)
@@ -26,7 +30,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 	op = (int) skops->op;
 	
-
 	/* Only execute the prog for scp */
 	if (skops->family != AF_INET6 || bpf_ntohl(skops->remote_port) != 22) {
 		skops->reply = -1;

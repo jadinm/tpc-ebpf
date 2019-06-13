@@ -2,6 +2,8 @@
 
 ../setup.sh
 
+make
+
 # mount the bpf FS
 mount -t bpf none /sys/fs/bpf
 
@@ -18,6 +20,7 @@ mkdir /sys/fs/cgroup/unified/test.slice
 #./bpftool prog load ./tcp_basertt_kern.o /sys/fs/bpf/prog type sockops 
 
 SOCKOPTID=`./bpftool prog  | grep handle_sockop | awk '{print $1} ' | sed -e 's/://g'`
+
 # attaching th program to the egress path of the cgroup FIXME id
 #./bpftool cgroup attach /sys/fs/cgroup/unified/test.slice/ egress id 3 multi
 ./bpftool cgroup attach /sys/fs/cgroup/unified/test.slice/ sock_ops id $SOCKOPTID multi
