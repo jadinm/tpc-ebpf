@@ -5,21 +5,12 @@
  */
 
 #define KBUILD_MODNAME "EBPF HHF"
+#include <asm/byteorder.h>
 #include <uapi/linux/bpf.h>
 #include "bpf_helpers.h"
-
-#define IPPROTO_TCP 6
-#define AF_INET6 10
-
-/* Only use this for debug output. Notice output from bpf_trace_printk()
- *  * end-up in /sys/kernel/debug/tracing/trace_pipe
- *   */
-#define bpf_debug(fmt, ...)						\
-			({							\
-			char ____fmt[] = fmt;				\
-			bpf_trace_printk(____fmt, sizeof(____fmt),	\
-			##__VA_ARGS__);			\
-			})
+#include "bpf_endian.h"
+#include "kernel.h"
+#include "utils.h"
 
 SEC("cgroup/sock")
 int handle_egress(struct __sk_buff *skb)
@@ -38,10 +29,10 @@ int handle_egress(struct __sk_buff *skb)
 	if (sk->family != AF_INET6 || sk->protocol != IPPROTO_TCP)
 		return 1;
 
-	bpf_debug("egress skb spotted\n");
+	bpf_debug("egress skb spotted dest: %x:%x\n",bpf_ntohl(skb->remote_ip6[0]), bpf_ntohl(skb->remote_ip6[3]));
 	bpf_trace_printk(fmt, sizeof(fmt), sk->family, sk->type, sk->protocol);
 
-	return 0;
+	return 1;
 }
 
 char _license[] SEC("license") = "GPL";
