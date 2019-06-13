@@ -21,12 +21,15 @@ SEC("sockops")
 int handle_sockop(struct bpf_sock_ops *skops)
 {
 	struct ip6_srh_t *srh;
-	char srh_buf[72]; // room for 3 segment
+	//struct bpf_sock_tuple tuple;
+	struct fab_test_key macle;
+	struct flow_infos *flow_info;
+	char srh_buf[72]; // room for 4 segment
 
 	int op;
 	int rv = 0;
 	int bufsize = 150000;
-	int key = 0;
+	int key = 0, keyport = 0;
 
 	op = (int) skops->op;
 	
@@ -34,6 +37,40 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	if (skops->family != AF_INET6 || bpf_ntohl(skops->remote_port) != 22) {
 		skops->reply = -1;
 		return 0;
+	}
+	macle.family = skops->family;
+	macle.local_addr[0] = skops->local_ip6[0];
+	macle.local_addr[1] = bpf_ntohl(skops->local_ip6[0]);
+	macle.local_addr[2] = 1;
+	macle.local_addr[3] = 2;
+	macle.remote_addr[0] = 4;
+	macle.remote_addr[1] = 4;
+	macle.remote_addr[2] = 4;
+	macle.remote_addr[3] = 4;
+	macle.local_port = 1;
+	macle.remote_port = 2;
+	/*macle.a = 1;
+	macle.b = 2;	
+	macle.c = 3;	
+	macle.d = 4;	
+	macle.e[0] = 4;	
+	macle.e[1] = 4;	
+	macle.e[2] = 4;	
+	macle.e[3] = 4;	
+	macle.f[0] = 4;	
+	macle.f[1] = 4;	
+	macle.f[2] = 4;	
+	macle.f[3] = 4;	*/
+	flow_info = (void *)bpf_map_lookup_elem(&conn_map, &macle);
+
+
+	if (!flow_info) {
+		bpf_debug("flow not found, adding it\n");
+		struct flow_infos new_flow;
+		new_flow.srh_id = 1;
+		new_flow.last_retransmit = 2345;
+		new_flow.curr_threshold = 6789;
+//		bpf_map_update_elem(&conn_map, &tuple, &new_flow, BPF_ANY);
 	}
 
 	switch (op) {
