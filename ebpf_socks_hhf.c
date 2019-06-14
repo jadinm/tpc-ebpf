@@ -28,8 +28,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 	int op;
 	int rv = 0;
-	int bufsize = 150000;
-	int key = 0, keyport = 0;
+	int key = 0;
 
 	op = (int) skops->op;
 	
@@ -40,27 +39,15 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	}
 	macle.family = skops->family;
 	macle.local_addr[0] = skops->local_ip6[0];
-	macle.local_addr[1] = bpf_ntohl(skops->local_ip6[0]);
-	macle.local_addr[2] = 1;
-	macle.local_addr[3] = 2;
-	macle.remote_addr[0] = 4;
-	macle.remote_addr[1] = 4;
-	macle.remote_addr[2] = 4;
-	macle.remote_addr[3] = 4;
-	macle.local_port = 1;
-	macle.remote_port = 2;
-	/*macle.a = 1;
-	macle.b = 2;	
-	macle.c = 3;	
-	macle.d = 4;	
-	macle.e[0] = 4;	
-	macle.e[1] = 4;	
-	macle.e[2] = 4;	
-	macle.e[3] = 4;	
-	macle.f[0] = 4;	
-	macle.f[1] = 4;	
-	macle.f[2] = 4;	
-	macle.f[3] = 4;	*/
+	macle.local_addr[1] = bpf_ntohl(skops->local_ip6[1]);
+	macle.local_addr[2] = bpf_ntohl(skops->local_ip6[2]);
+	macle.local_addr[3] = bpf_ntohl(skops->local_ip6[3]);
+	macle.remote_addr[0] = skops->remote_ip6[0];
+	macle.remote_addr[1] = bpf_ntohl(skops->remote_ip6[1]);
+	macle.remote_addr[2] = bpf_ntohl(skops->remote_ip6[2]);
+	macle.remote_addr[3] = bpf_ntohl(skops->remote_ip6[3]);
+	macle.local_port =  skops->local_port;
+	macle.remote_port = bpf_ntohl(skops->remote_port);
 	flow_info = (void *)bpf_map_lookup_elem(&conn_map, &macle);
 
 
@@ -70,7 +57,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		new_flow.srh_id = 1;
 		new_flow.last_retransmit = 2345;
 		new_flow.curr_threshold = 6789;
-//		bpf_map_update_elem(&conn_map, &tuple, &new_flow, BPF_ANY);
+		bpf_map_update_elem(&conn_map, &macle, &new_flow, BPF_ANY);
 	}
 
 	switch (op) {

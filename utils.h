@@ -67,10 +67,10 @@ struct fab_flow_tuple {
 
 struct fab_test_key {
 	__u32 family;
-	__be32 local_addr[4];
-	__be32 remote_addr[4];
-	__be16 local_port;
-	__be16 remote_port;	
+	__u32 local_addr[4];
+	__u32 remote_addr[4];
+	__u32 local_port;
+	__u32 remote_port;	
 	/*__u32 a;
 	__be32 b;
 	__be16 c;
