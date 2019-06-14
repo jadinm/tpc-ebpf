@@ -16,20 +16,21 @@
 				0xFFFFFFFF) << 32) | bpf_htonl((x) >> 32))
 #define ntohll(x) ((bpf_ntohl(1)) == 1 ? (x) : ((uint64_t)bpf_ntohl((x) & \
 				0xFFFFFFFF) << 32) | bpf_ntohl((x) >> 32))
-
+#define TCP_CLOSE 7
 SEC("sockops")
 int handle_sockop(struct bpf_sock_ops *skops)
 {
 	struct ip6_srh_t *srh;
-	//struct bpf_sock_tuple tuple;
-	struct fab_test_key macle;
 	struct flow_infos *flow_info;
+	struct flow_tuple flow_id;
 	char srh_buf[72]; // room for 4 segment
 
 	int op;
 	int rv = 0;
 	int key = 0;
+//	__u64 cur_time;
 
+//	cur_time = bpf_ktime_get_ns();
 	op = (int) skops->op;
 	
 	/* Only execute the prog for scp */
@@ -37,52 +38,64 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		skops->reply = -1;
 		return 0;
 	}
-	macle.family = skops->family;
-	macle.local_addr[0] = skops->local_ip6[0];
-	macle.local_addr[1] = bpf_ntohl(skops->local_ip6[1]);
-	macle.local_addr[2] = bpf_ntohl(skops->local_ip6[2]);
-	macle.local_addr[3] = bpf_ntohl(skops->local_ip6[3]);
-	macle.remote_addr[0] = skops->remote_ip6[0];
-	macle.remote_addr[1] = bpf_ntohl(skops->remote_ip6[1]);
-	macle.remote_addr[2] = bpf_ntohl(skops->remote_ip6[2]);
-	macle.remote_addr[3] = bpf_ntohl(skops->remote_ip6[3]);
-	macle.local_port =  skops->local_port;
-	macle.remote_port = bpf_ntohl(skops->remote_port);
-	flow_info = (void *)bpf_map_lookup_elem(&conn_map, &macle);
 
+	get_flow_id_from_sock(&flow_id, skops);
+	flow_info = (void *)bpf_map_lookup_elem(&conn_map, &flow_id);
 
 	if (!flow_info) {
+		int ret;
+
 		bpf_debug("flow not found, adding it\n");
 		struct flow_infos new_flow;
 		new_flow.srh_id = 1;
 		new_flow.last_retransmit = 2345;
 		new_flow.curr_threshold = 6789;
-		bpf_map_update_elem(&conn_map, &macle, &new_flow, BPF_ANY);
+		ret = bpf_map_update_elem(&conn_map, &flow_id, &new_flow, BPF_ANY);
+		if (ret) 
+			return 1;
 	}
 
+	//bpf_debug("segs_out: %lu packets: %lu interval: %lu\n", skops->segs_out, skops->rate_delivered, skops->rate_interval_us);
+	//bpf_debug("snd_una: %lu rate : %lu interval: %lu\n", skops->snd_una, skops->rate_delivered, skops->rate_interval_us);
 	switch (op) {
+		case BPF_SOCK_OPS_STATE_CB:
+			//bpf_debug("STATE_CHANGING: %lu %lu %lu\n", skops->state, skops->args[0], skops->args[1]);
+			if (skops->args[1] == BPF_TCP_CLOSE) {
+				bpf_map_delete_elem(&conn_map, &flow_id);
+			}
+			break;
+		case BPF_SOCK_OPS_RWND_INIT:
+		case BPF_SOCK_OPS_TIMEOUT_INIT:
+			return 0;
 		case BPF_SOCK_OPS_TCP_XMIT:
 		case BPF_SOCK_OPS_UDP_XMIT:
 			break;
 		case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
+			break;
+		case BPF_SOCK_OPS_TCP_CONNECT_CB:
+			bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_STATE_CB_FLAG);
 			srh = (void *)bpf_map_lookup_elem(&srh_map, &key);
 			if (srh)
 				rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
 						srh, sizeof(srh_buf)); 
 			break;
 		case BPF_SOCK_OPS_RETRANS_CB:
-			key = ((key+1)%2);
-			srh = (void *)bpf_map_lookup_elem(&srh_map, &key); 
-			/*bpf_map_update_elem(&map, &key, srh, BPF_ANY); */
-			if (srh)
-				rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
-						srh, sizeof(srh_buf)); 
+			flow_info = (void *)bpf_map_lookup_elem(&conn_map, &flow_id);
+			if (flow_info) {
+				flow_info->srh_id = ((flow_info->srh_id+1)%2);
+				bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				srh = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id); 
+				if (srh) 
+					rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
+							srh, sizeof(srh_buf)); 
+			}
 			break;
 
 	}
 	skops->reply = rv;
 
-	return 1;
+	return 0;
 }
 
 char _license[] SEC("license") = "GPL";

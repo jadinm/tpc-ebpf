@@ -56,28 +56,15 @@ struct ip6_srh_t {
 
 	struct ip6_addr_t segments[0];
 } __attribute__((packed));
-/*
-struct fab_flow_tuple {
-	__u32 family;
-	__be32 local_addr[4];
-	__be32 remote_addr[4];
-	__be16 local_port;
-	__be16 remote_port;	
-};*/
 
-struct fab_test_key {
+struct flow_tuple {
 	__u32 family;
 	__u32 local_addr[4];
 	__u32 remote_addr[4];
 	__u32 local_port;
 	__u32 remote_port;	
-	/*__u32 a;
-	__be32 b;
-	__be16 c;
-	__be16 d;
-	__be32 e[4];
-	__be32 f[4];*/
 };
+
 struct flow_infos {
 	__u32 srh_id;
 	__u32 last_retransmit;
@@ -94,6 +81,20 @@ struct bpf_elf_map {
 	__u32 pinning;
 };
 
+static __always_inline void get_flow_id_from_sock(struct flow_tuple *flow_id, struct bpf_sock_ops *skops) {
+	flow_id->family = skops->family;
+	flow_id->local_addr[0] = skops->local_ip6[0];
+	flow_id->local_addr[1] = bpf_ntohl(skops->local_ip6[1]);
+	flow_id->local_addr[2] = bpf_ntohl(skops->local_ip6[2]);
+	flow_id->local_addr[3] = bpf_ntohl(skops->local_ip6[3]);
+	flow_id->remote_addr[0] = skops->remote_ip6[0];
+	flow_id->remote_addr[1] = bpf_ntohl(skops->remote_ip6[1]);
+	flow_id->remote_addr[2] = bpf_ntohl(skops->remote_ip6[2]);
+	flow_id->remote_addr[3] = bpf_ntohl(skops->remote_ip6[3]);
+	flow_id->local_port =  skops->local_port;
+	flow_id->remote_port = bpf_ntohl(skops->remote_port);
+}
+
 struct bpf_elf_map SEC("maps") srh_map = {
 	.type		= BPF_MAP_TYPE_ARRAY,
 	.size_key	= sizeof(uint32_t),
@@ -104,8 +105,7 @@ struct bpf_elf_map SEC("maps") srh_map = {
 
 struct bpf_elf_map SEC("maps") conn_map = {
 	.type		= BPF_MAP_TYPE_HASH,
-	/*.size_key	= sizeof(struct bpf_sock_tuple),*/
-	.size_key	= sizeof(struct fab_test_key),
+	.size_key	= sizeof(struct flow_tuple),
 	.size_value	= sizeof(struct flow_infos),
 	.pinning	= PIN_NONE,
 	.max_elem	= 3,
