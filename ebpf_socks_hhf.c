@@ -28,6 +28,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	int op;
 	int rv = 0;
 	int key = 0;
+	int tempkey = 0;
+	uint64_t tempval = 300;
 //	__u64 cur_time;
 
 //	cur_time = bpf_ktime_get_ns();
@@ -39,6 +41,14 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		return 0;
 	}
 
+	bpf_map_update_elem(&bw_map, &tempkey, &tempval, BPF_ANY);
+	tempkey++;
+	tempval = 100;
+	bpf_map_update_elem(&bw_map, &tempkey, &tempval, BPF_ANY);
+	tempkey++;
+	tempval = 200;
+	bpf_map_update_elem(&bw_map, &tempkey, &tempval, BPF_ANY);
+
 	get_flow_id_from_sock(&flow_id, skops);
 	flow_info = (void *)bpf_map_lookup_elem(&conn_map, &flow_id);
 
@@ -47,9 +57,11 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 		bpf_debug("flow not found, adding it\n");
 		struct flow_infos new_flow;
-		new_flow.srh_id = 1;
-		new_flow.last_retransmit = 2345;
-		new_flow.curr_threshold = 6789;
+		new_flow.srh_id = get_best_path(&bw_map);
+		bpf_debug("Select path ID : %lu\n", new_flow.srh_id);
+		new_flow.last_reported_bw = 0;
+		new_flow.sample_start_time = 0;
+		new_flow.current_bytes = 0;
 		ret = bpf_map_update_elem(&conn_map, &flow_id, &new_flow, BPF_ANY);
 		if (ret) 
 			return 1;
@@ -59,7 +71,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	//bpf_debug("snd_una: %lu rate : %lu interval: %lu\n", skops->snd_una, skops->rate_delivered, skops->rate_interval_us);
 	switch (op) {
 		case BPF_SOCK_OPS_STATE_CB:
-			//bpf_debug("STATE_CHANGING: %lu %lu %lu\n", skops->state, skops->args[0], skops->args[1]);
 			if (skops->args[1] == BPF_TCP_CLOSE) {
 				bpf_map_delete_elem(&conn_map, &flow_id);
 			}
@@ -81,6 +92,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 						srh, sizeof(srh_buf)); 
 			break;
 		case BPF_SOCK_OPS_RETRANS_CB:
+			bpf_debug("Restrans called\n");
 			flow_info = (void *)bpf_map_lookup_elem(&conn_map, &flow_id);
 			if (flow_info) {
 				flow_info->srh_id = ((flow_info->srh_id+1)%2);
