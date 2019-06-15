@@ -77,7 +77,8 @@ struct flow_infos {
 	__u32 srh_id;
 	__u32 last_reported_bw;
 	__u64 sample_start_time;
-	__u32 current_bytes;
+	__u32 sample_start_bytes;
+	__u64 last_move_time;
 } __attribute__((packed));
 
 struct bpf_elf_map {
@@ -119,6 +120,46 @@ static __always_inline uint32_t get_best_path(struct bpf_elf_map *b_map) {
 	#pragma clang loop unroll(full)
 	for (unsigned int i = 1; i < MAX_SRH; i++) {
 		int j = i; /* Compiler cannot unroll otherwise */
+		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);
+
+		/* We reached the number of current path */
+		if (!srh_record)
+			break;
+
+		if (!srh_record->is_valid)
+			continue;
+
+		current_bp = srh_record->curr_bw;
+		bpf_debug("current bp: %lu\n", current_bp);
+		if (current_bp < lowest_bp) {
+			lowest_bp = current_bp;
+			lowest_id = i;
+		}
+
+	}
+	return lowest_id;
+}
+
+static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struct flow_infos *flow_info) {
+	uint64_t lowest_bp;
+	uint32_t lowest_id, current_bp;
+	struct srh_record_t *srh_record;
+
+	lowest_id = flow_info->srh_id;
+	srh_record = (void *) bpf_map_lookup_elem(b_map, &lowest_id);
+
+	if (!srh_record)
+		return 0;
+
+	lowest_bp = srh_record->curr_bw;
+
+	#pragma clang loop unroll(full)
+	for (unsigned int i = 0; i < MAX_SRH; i++) {
+		int j = i; /* Compiler cannot unroll otherwise */
+
+		if (i == lowest_id)
+			continue;
+
 		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);
 
 		/* We reached the number of current path */
