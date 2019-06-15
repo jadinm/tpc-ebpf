@@ -74,7 +74,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		case BPF_SOCK_OPS_TCP_XMIT:
 			//bpf_debug("currtime: %llu start time : %llu\n", cur_time, flow_info->sample_start_time);
 			bpf_debug("una: %lu, start: %lu, bytes envoyes : %lu\n",skops->snd_una, flow_info->sample_start_bytes, skops->snd_una - flow_info->sample_start_bytes);
-			/* More than one second has passed, let's check */
+			/* More than 1/10 second has passed, let's check */
 			if ((cur_time - flow_info->sample_start_time) >= 100000000) {
 			//	uint64_t factor = (cur_time - flow_info->sample_start_time)/100000000;
 				uint64_t factor = ((/*10000**/(cur_time - flow_info->sample_start_time)) + 100000000/2)/100000000;
