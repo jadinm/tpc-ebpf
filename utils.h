@@ -60,7 +60,7 @@ struct ip6_srh_t {
 
 struct srh_record_t {
 	__u32 srh_id;
-	__u16 is_valid;
+	__u32 is_valid;
 	__u64 curr_bw; 
 	struct ip6_srh_t srh;
 } __attribute__((packed));
@@ -107,23 +107,28 @@ static __always_inline void get_flow_id_from_sock(struct flow_tuple *flow_id, st
 static __always_inline uint32_t get_best_path(struct bpf_elf_map *b_map) {
 	uint64_t lowest_bp;
 	uint32_t lowest_id = 0, current_bp;
-	uint64_t *map_result;
+	struct srh_record_t *srh_record;
 
-	map_result = (uint64_t *) bpf_map_lookup_elem(b_map, &lowest_id);
-	if (!map_result)
+	srh_record = (void *) bpf_map_lookup_elem(b_map, &lowest_id);
+
+	if (!srh_record)
 		return 0;
-	lowest_bp = *map_result;
+
+	lowest_bp = srh_record->curr_bw;
 
 	#pragma clang loop unroll(full)
 	for (unsigned int i = 1; i < MAX_SRH; i++) {
 		int j = i; /* Compiler cannot unroll otherwise */
-		map_result = (uint64_t *)bpf_map_lookup_elem(b_map, &j);
+		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);
 
 		/* We reached the number of current path */
-		if (!map_result)
+		if (!srh_record)
 			break;
 
-		current_bp = *map_result;
+		if (!srh_record->is_valid)
+			continue;
+
+		current_bp = srh_record->curr_bw;
 		bpf_debug("current bp: %lu\n", current_bp);
 		if (current_bp < lowest_bp) {
 			lowest_bp = current_bp;
@@ -133,18 +138,11 @@ static __always_inline uint32_t get_best_path(struct bpf_elf_map *b_map) {
 	}
 	return lowest_id;
 }
+
 struct bpf_elf_map SEC("maps") srh_map = {
 	.type		= BPF_MAP_TYPE_ARRAY,
 	.size_key	= sizeof(uint32_t),
-	.size_value	= 72,
-	.pinning	= PIN_NONE,
-	.max_elem	= MAX_SRH,
-};
-
-struct bpf_elf_map SEC("maps") bw_map = {
-	.type		= BPF_MAP_TYPE_ARRAY,
-	.size_key	= sizeof(uint32_t),
-	.size_value	= sizeof(uint64_t),
+	.size_value	= 16 + 72,
 	.pinning	= PIN_NONE,
 	.max_elem	= MAX_SRH,
 };
