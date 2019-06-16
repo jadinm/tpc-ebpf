@@ -122,6 +122,46 @@ int handle_sockop(struct bpf_sock_ops *skops)
 						&srh_record->srh, sizeof(srh_buf)); 
 			}
 			break;
+
+		case BPF_SOCK_OPS_ECN_CE:
+			bpf_debug("Congestion experienced\n");
+			key = get_better_path(&srh_map, flow_info, 0);
+
+			/* This can't be helped */
+			if (key == flow_info->srh_id)
+				break;
+
+			/* We already moved less than 3 seconds ago... do nothing */
+			if ((cur_time - flow_info->last_move_time) < 3000000000)
+				break;
+
+			/* Get the infos for the current path and remove our bw */
+			srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id);
+			if (srh_record) {
+				srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
+				bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+			}
+
+			/* Then move to the next path */
+			srh_record = (void *)bpf_map_lookup_elem(&srh_map, &key);
+			if (srh_record) {
+				rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
+						&srh_record->srh, sizeof(srh_buf));
+				if (!rv) {
+					/* Update flow informations */
+					flow_info->srh_id = key;
+					flow_info->last_move_time = cur_time;
+					flow_info->first_loss_time = 0;
+					flow_info->number_of_loss = 0;
+					bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+
+					/* Update the new path bw */
+					srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw;
+					bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+				}
+			}
+			break;
+
 		case BPF_SOCK_OPS_RETRANS_CB:
 			bpf_debug("Restrans called\n");
 			key = get_better_path(&srh_map, flow_info, 1);
