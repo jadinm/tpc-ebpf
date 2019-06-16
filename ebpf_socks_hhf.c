@@ -175,6 +175,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 					/* Update flow informations */
 					flow_info->srh_id = key;
 					flow_info->last_move_time = cur_time;
+					flow_info->first_loss_time = 0;
+					flow_info->number_of_loss = 0;
 					bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 
 					/* Update the new path bw */
