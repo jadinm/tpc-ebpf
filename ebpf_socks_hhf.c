@@ -105,13 +105,13 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		case BPF_SOCK_OPS_UDP_XMIT:
 			break;
 		case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
 			bpf_debug("Una initial: %lu\n", skops->snd_una);
 			flow_info->sample_start_time = cur_time;
 			flow_info->sample_start_bytes = skops->snd_una;
 			bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
-
-		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
 			break;
+
 		case BPF_SOCK_OPS_TCP_CONNECT_CB:
 			bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_STATE_CB_FLAG);
 			srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id);
