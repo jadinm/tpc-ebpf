@@ -79,6 +79,8 @@ struct flow_infos {
 	__u64 sample_start_time;
 	__u32 sample_start_bytes;
 	__u64 last_move_time;
+	__u64 first_loss_time;
+	__u32 number_of_loss;
 } __attribute__((packed));
 
 struct bpf_elf_map {
