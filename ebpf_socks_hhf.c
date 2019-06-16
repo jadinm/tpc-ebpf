@@ -64,7 +64,15 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	//bpf_debug("snd_una: %lu rate : %lu interval: %lu\n", skops->snd_una, skops->rate_delivered, skops->rate_interval_us);
 	switch (op) {
 		case BPF_SOCK_OPS_STATE_CB:
+			/* This flow is closed, cleanup the maps */
 			if (skops->args[1] == BPF_TCP_CLOSE) {
+				/* Remove the bw this flow occupied */
+				srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id);
+				if (srh_record) {
+					srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
+					bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+				}
+				/* Delete the flow from the flows map */
 				bpf_map_delete_elem(&conn_map, &flow_id);
 			}
 			break;
@@ -73,22 +81,26 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			return 0;
 		case BPF_SOCK_OPS_TCP_XMIT:
 			//bpf_debug("currtime: %llu start time : %llu\n", cur_time, flow_info->sample_start_time);
-			bpf_debug("una: %lu, start: %lu, bytes envoyes : %lu\n",skops->snd_una, flow_info->sample_start_bytes, skops->snd_una - flow_info->sample_start_bytes);
+			//bpf_debug("una: %lu, start: %lu, bytes envoyes : %lu\n",skops->snd_una, flow_info->sample_start_bytes, skops->snd_una - flow_info->sample_start_bytes);
 			/* More than 1/10 second has passed, let's check */
 			if ((cur_time - flow_info->sample_start_time) >= 100000000) {
 			//	uint64_t factor = (cur_time - flow_info->sample_start_time)/100000000;
 				uint64_t factor = ((/*10000**/(cur_time - flow_info->sample_start_time)) + 100000000/2)/100000000;
 				uint32_t bytes_sent = skops->snd_una - flow_info->sample_start_bytes;
 				uint32_t bw = (((bytes_sent/**10000*/)/factor)/*/10000*/);
-				bpf_debug("start: %llu curr: %llu factor: %lu\n",flow_info->sample_start_time, cur_time, factor);	
-				flow_info->sample_start_time = cur_time;
-				flow_info->sample_start_bytes = skops->snd_una;
-				bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+			/*	bpf_debug("start: %llu curr: %llu factor: %lu\n",flow_info->sample_start_time, cur_time, factor);*/
 				bpf_debug("Estimated bw: %lu (bytes sent: %lu)\n", bw, bytes_sent);
-			} else {
-			
+				srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id);
+				if (srh_record) {
+					srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
+					srh_record->curr_bw = srh_record->curr_bw + bw;
+					flow_info->sample_start_time = cur_time;
+					flow_info->sample_start_bytes = skops->snd_una;
+					flow_info->last_reported_bw = bw;
+					bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+					bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+				}
 			}
-			
 			break;
 		case BPF_SOCK_OPS_UDP_XMIT:
 			break;
