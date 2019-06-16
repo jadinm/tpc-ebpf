@@ -130,7 +130,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			if ((cur_time - flow_info->last_move_time) < 3000000000)
 				break;
 			
-
 			/* If this is the first time we experience a loss for this sample */
 			if (flow_info->first_loss_time == 0) {
 				flow_info->first_loss_time = cur_time;
@@ -155,9 +154,19 @@ int handle_sockop(struct bpf_sock_ops *skops)
 				}
 			}
 
-			/* If we already are on the best path, nothing to do */
-			if (key == flow_info->srh_id)
-				break;
+			/* If we already are on the best path */
+			if (key == flow_info->srh_id) {
+				/* If this pith isn't THAT bad, let's stay */
+				if (flow_info->number_of_loss < 10)
+					break;
+
+				/* Try a different path */
+				key = get_better_path(&srh_map, flow_info, 0);
+
+				/* Couldn't get a best path, too bad, nothing we can do */
+				if (key == flow_info->srh_id)
+					break;
+			}
 
 			/* First, remove our info from the previous path */
 			srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id); 

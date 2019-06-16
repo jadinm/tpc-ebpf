@@ -153,13 +153,10 @@ static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struc
 		lowest_id = flow_info->srh_id;
 		firsti = 0;
 	} else {
-		/* If int's not allowed and it's 0,
-		 * using 1 as a reference, thus
-		 * starting at 2 */
-		if (flow_info->srh_id == 0) {
+		/* If self is not allowed and it's 0,
+		 * using 1 as a reference */
+		if (flow_info->srh_id == 0) 
 			lowest_id = 1;
-			firsti = 2;
-		}
 	}
 
 	srh_record = (void *) bpf_map_lookup_elem(b_map, &lowest_id);
