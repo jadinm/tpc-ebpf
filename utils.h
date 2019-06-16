@@ -192,6 +192,38 @@ static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struc
 	return lowest_id;
 }
 
+static __always_inline uint32_t change_path(struct bpf_sock_ops *skops, struct bpf_elf_map *srh_map, struct bpf_elf_map *conn_map, struct flow_tuple *flow_id, struct flow_infos *flow_info, int key, uint64_t cur_time) {
+	struct srh_record_t *srh_record;
+	int rv;
+
+	/* Get the infos for the current path and remove our bw */
+	srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id);
+	if (srh_record) {
+		srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
+		bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+	}
+
+	/* Then move to the next path */
+	srh_record = (void *)bpf_map_lookup_elem(&srh_map, &key);
+	if (srh_record) {
+		rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
+				&srh_record->srh, 72);
+		if (!rv) {
+			/* Update flow informations */
+			flow_info->srh_id = key;
+			flow_info->last_move_time = cur_time;
+			flow_info->first_loss_time = 0;
+			flow_info->number_of_loss = 0;
+			bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+
+			/* Update the new path bw */
+			srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw;
+			bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+		}
+	}
+	return rv;
+}
+
 struct bpf_elf_map SEC("maps") srh_map = {
 	.type		= BPF_MAP_TYPE_ARRAY,
 	.size_key	= sizeof(uint32_t),
