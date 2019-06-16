@@ -140,24 +140,37 @@ static __always_inline uint32_t get_best_path(struct bpf_elf_map *b_map) {
 	return lowest_id;
 }
 
-static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struct flow_infos *flow_info) {
+static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struct flow_infos *flow_info, int self_allowed) {
 	uint64_t lowest_bp;
-	uint32_t lowest_id, current_bp;
+	uint32_t lowest_id=0, current_bp;
 	struct srh_record_t *srh_record;
+	unsigned int firsti = 1;
 
-	lowest_id = flow_info->srh_id;
+	/* If it's allowed to return itself, using it as reference */
+	if (self_allowed) {
+		lowest_id = flow_info->srh_id;
+		firsti = 0;
+	} else {
+		/* If int's not allowed and it's 0,
+		 * using 1 as a reference, thus
+		 * starting at 2 */
+		if (flow_info->srh_id == 0) {
+			lowest_id = 1;
+			firsti = 2;
+		}
+	}
+
 	srh_record = (void *) bpf_map_lookup_elem(b_map, &lowest_id);
-
 	if (!srh_record)
 		return 0;
 
 	lowest_bp = srh_record->curr_bw;
 
 	#pragma clang loop unroll(full)
-	for (unsigned int i = 0; i < MAX_SRH; i++) {
+	for (unsigned int i = firsti; i < MAX_SRH; i++) {
 		int j = i; /* Compiler cannot unroll otherwise */
 
-		if (i == lowest_id)
+		if (!self_allowed && i == flow_info->srh_id)
 			continue;
 
 		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);

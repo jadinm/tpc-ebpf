@@ -63,7 +63,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	//bpf_debug("segs_out: %lu packets: %lu interval: %lu\n", skops->segs_out, skops->rate_delivered, skops->rate_interval_us);
 	//bpf_debug("snd_una: %lu rate : %lu interval: %lu\n", skops->snd_una, skops->rate_delivered, skops->rate_interval_us);
 	switch (op) {
-		case BPF_SOCK_OPS_STATE_CB:
+		case BPF_SOCK_OPS_STATE_CB: /* Change in the state of the TCP CONNECTION */
 			/* This flow is closed, cleanup the maps */
 			if (skops->args[1] == BPF_TCP_CLOSE) {
 				/* Remove the bw this flow occupied */
@@ -122,7 +122,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			break;
 		case BPF_SOCK_OPS_RETRANS_CB:
 			bpf_debug("Restrans called\n");
-			key = get_better_path(&srh_map, flow_info);
+			key = get_better_path(&srh_map, flow_info, 1);
+
 			/* If we already are on the best path, nothing to do */
 			if (key == flow_info->srh_id)
 				break;
@@ -137,6 +138,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 			srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id); 
 			if (srh_record) { 
+				srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw;
+				bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
 				rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
 						&srh_record->srh, sizeof(srh_buf));
 			}
