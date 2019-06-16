@@ -52,6 +52,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		new_flow.sample_start_time = cur_time;
 		new_flow.sample_start_bytes = skops->snd_una;
 		new_flow.last_move_time = cur_time;
+		new_flow.first_loss_time = 0;
+		new_flow.number_of_loss = 0;
 		ret = bpf_map_update_elem(&conn_map, &flow_id, &new_flow, BPF_ANY);
 		if (ret) 
 			return 1;
@@ -127,6 +129,31 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			/* We already moved less than 3 seconds ago... do nothing */
 			if ((cur_time - flow_info->last_move_time) < 3000000000)
 				break;
+			
+
+			/* If this is the first time we experience a loss for this sample */
+			if (flow_info->first_loss_time == 0) {
+				flow_info->first_loss_time = cur_time;
+				flow_info->number_of_loss = 1;
+				bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				break;
+			}
+
+			flow_info->number_of_loss++;	
+
+			/* If we experienced more than 3 losses in 1 second */
+			if ((cur_time - flow_info->first_loss_time) > 1000000000) {
+				flow_info->first_loss_time = cur_time;
+				flow_info->number_of_loss = 1;
+				bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				break;
+			} else {
+				/* It's been lesst than 1 second */
+				if (flow_info->number_of_loss < 4) {
+					bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+					break;	
+				}
+			}
 
 			/* If we already are on the best path, nothing to do */
 			if (key == flow_info->srh_id)
