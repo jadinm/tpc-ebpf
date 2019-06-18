@@ -116,6 +116,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 		case BPF_SOCK_OPS_TCP_CONNECT_CB:
 			bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_STATE_CB_FLAG);
+			//bpf_sock_ops_cb_flags_set(skops, (BPF_SOCK_OPS_RETRANS_CB_FLAG|BPF_SOCK_OPS_RTO_CB_FLAG));
 			srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id);
 			if (srh_record) {
 				rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
@@ -125,14 +126,15 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 		case BPF_SOCK_OPS_ECN_CE:
 			bpf_debug("Congestion experienced\n");
+
+			/* We already moved less than 3 seconds ago... do nothing */
+			if ((cur_time - flow_info->last_move_time) < 3000000000)
+				break;
+
 			key = get_better_path(&srh_map, flow_info, 0);
 
 			/* This can't be helped */
 			if (key == flow_info->srh_id)
-				break;
-
-			/* We already moved less than 3 seconds ago... do nothing */
-			if ((cur_time - flow_info->last_move_time) < 3000000000)
 				break;
 
 			/* Get the infos for the current path and remove our bw */
