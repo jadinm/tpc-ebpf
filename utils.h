@@ -125,7 +125,7 @@ static __always_inline uint32_t get_best_path(struct bpf_elf_map *b_map) {
 		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);
 
 		/* We reached the number of current path */
-		if (!srh_record)
+		if (!srh_record || !srh_record->srh.type)
 			break;
 
 		if (!srh_record->is_valid)
@@ -175,7 +175,7 @@ static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struc
 		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);
 
 		/* We reached the number of current path */
-		if (!srh_record)
+		if (!srh_record || !srh_record->srh.type)
 			break;
 
 		if (!srh_record->is_valid)
