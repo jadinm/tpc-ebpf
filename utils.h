@@ -24,6 +24,7 @@
 
 #define SEC(NAME) __attribute__((section(NAME), used))
 
+#ifdef  DEBUG
 /* Only use this for debug output. Notice output from bpf_trace_printk()
  *  * end-up in /sys/kernel/debug/tracing/trace_pipe
  *   */
@@ -33,6 +34,9 @@
 			bpf_trace_printk(____fmt, sizeof(____fmt),	\
 			##__VA_ARGS__);					\
 			})
+#else
+#define bpf_debug(fmt, ...) { } while (0)
+#endif
 
 #define htonll(x) ((bpf_htonl(1)) == 1 ? (x) : ((uint64_t)bpf_htonl((x) & \
 				0xFFFFFFFF) << 32) | bpf_htonl((x) >> 32))
