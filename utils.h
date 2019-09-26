@@ -1,15 +1,17 @@
 /* Defining constant values */
 
-#define IPPROTO_TCP 		6 /* TCP protocol in HDR */
+#define IPPROTO_TCP 	6 /* TCP protocol in HDR */
 #define AF_INET6 		10 /* IPv6 HDR */
 #define SOL_IPV6 		41 /* IPv6 Sockopt */
 #define IPV6_RTHDR 		57 /* SRv6 Option for sockopt */
 #define ETH_HLEN 		14 /* Ethernet hdr length */
 #define DEBUG 			1
 #define PIN_NONE		0
-#define PIN_GLOBAL_NS		2
-#define MAX_SRH			3
+#define PIN_GLOBAL_NS	2
+#define MAX_SRH			50
 #define MAX_FLOWS		1024
+#define MAX_SRH_BY_DEST 4
+#define MAX_SEGS_NBR	4
 
 /* eBPF definitions */
 #ifndef __section
@@ -59,7 +61,7 @@ struct ip6_srh_t {
 	unsigned char flags;
 	unsigned short tag;
 
-	struct ip6_addr_t segments[0];
+	struct ip6_addr_t segments[MAX_SEGS_NBR];
 } __attribute__((packed));
 
 struct srh_record_t {
@@ -87,6 +89,11 @@ struct flow_infos {
 	__u32 number_of_loss;
 } __attribute__((packed));
 
+struct dst_infos {
+	struct ip6_addr_t dest;
+	struct srh_record_t srhs[MAX_SRH_BY_DEST];
+} __attribute__((packed));
+
 struct bpf_elf_map {
 	__u32 type;
 	__u32 size_key;
@@ -95,6 +102,11 @@ struct bpf_elf_map {
 	__u32 flags;
 	__u32 id;
 	__u32 pinning;
+} __attribute__((packed));
+
+struct params_better_path {
+	int self_allowed;
+	struct ip6_addr_t *dst_addr;
 } __attribute__((packed));
 
 static __always_inline void get_flow_id_from_sock(struct flow_tuple *flow_id, struct bpf_sock_ops *skops) {
@@ -111,79 +123,44 @@ static __always_inline void get_flow_id_from_sock(struct flow_tuple *flow_id, st
 	flow_id->remote_port = bpf_ntohl(skops->remote_port);
 }
 
-static __always_inline uint32_t get_best_path(struct bpf_elf_map *b_map) {
-	uint64_t lowest_bp;
-	uint32_t lowest_id = 0, current_bp;
-	struct srh_record_t *srh_record;
-
-	srh_record = (void *) bpf_map_lookup_elem(b_map, &lowest_id);
-
-	if (!srh_record)
-		return 0;
-
-	lowest_bp = srh_record->curr_bw;
-
-	#pragma clang loop unroll(full)
-	for (unsigned int i = 1; i < MAX_SRH; i++) {
-		int j = i; /* Compiler cannot unroll otherwise */
-		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);
-
-		/* We reached the number of current path */
-		if (!srh_record || !srh_record->srh.type)
-			break;
-
-		if (!srh_record->is_valid)
-			continue;
-
-		current_bp = srh_record->curr_bw;
-		bpf_debug("current bp: %lu\n", current_bp);
-		if (current_bp < lowest_bp) {
-			lowest_bp = current_bp;
-			lowest_id = i;
-		}
-
-	}
-	return lowest_id;
-}
-
-static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struct flow_infos *flow_info, int self_allowed) {
-	uint64_t lowest_bp;
-	uint32_t lowest_id=0, current_bp;
-	struct srh_record_t *srh_record;
+static __always_inline uint32_t get_best_dest_path(struct bpf_elf_map *dt_map, struct ip6_addr_t *dst_addr) {
+	uint64_t lowest_bp = 0;
+	uint32_t lowest_id = 0, current_bp = 0;
+	struct srh_record_t *srh_record = NULL;
 	unsigned int firsti = 1;
+	struct dst_infos *dst_infos = NULL;
 
-	/* If it's allowed to return itself, using it as reference */
-	if (self_allowed) {
-		lowest_id = flow_info->srh_id;
-		firsti = 0;
-	} else {
-		/* If self is not allowed and it's 0,
-		 * using 1 as a reference */
-		if (flow_info->srh_id == 0) 
-			lowest_id = 1;
+
+	dst_infos = (void *) bpf_map_lookup_elem(dt_map, dst_addr);
+	if (!dst_infos) {
+		bpf_debug("Cannot find the destination entry => Cannot find another SRH\n");
+		return lowest_id;
 	}
 
-	srh_record = (void *) bpf_map_lookup_elem(b_map, &lowest_id);
-	if (!srh_record)
-		return 0;
-
-	lowest_bp = srh_record->curr_bw;
+	if (lowest_id >=0 && lowest_id < MAX_SRH_BY_DEST) {
+		srh_record = &dst_infos->srhs[lowest_id];
+		if (!srh_record) {
+			bpf_debug("Cannot find the SRH entry\n");
+		} else {
+			lowest_bp = srh_record->curr_bw;
+		}
+	}
 
 	#pragma clang loop unroll(full)
-	for (unsigned int i = firsti; i < MAX_SRH; i++) {
-		int j = i; /* Compiler cannot unroll otherwise */
+	for (unsigned int i = firsti; i < MAX_SRH_BY_DEST; i++) {
+		int j = i; // Compiler cannot unroll otherwise
+		srh_record = &dst_infos->srhs[i];
 
-		if (!self_allowed && i == flow_info->srh_id)
+		// Wrong SRH ID -> might be inconsistent state, so skip
+		if (!srh_record || !srh_record->srh.type) {
+			bpf_debug("Cannot find the SRH entry indexed at a dest entry\n");
 			continue;
+		}
 
-		srh_record = (void *)bpf_map_lookup_elem(b_map, &j);
-
-		/* We reached the number of current path */
-		if (!srh_record || !srh_record->srh.type)
-			break;
-
-		if (!srh_record->is_valid)
-			continue;
+		if (!srh_record->is_valid) {
+			bpf_debug("SRH entry indexed by the dest entry is invalid\n");
+			continue; // Not a valid SRH for the destination
+		}
 
 		current_bp = srh_record->curr_bw;
 		bpf_debug("current bp: %lu\n", current_bp);
@@ -196,50 +173,73 @@ static __always_inline uint32_t get_better_path(struct bpf_elf_map *b_map, struc
 	return lowest_id;
 }
 
-static __always_inline uint32_t change_path(struct bpf_sock_ops *skops, struct bpf_elf_map *srh_map, struct bpf_elf_map *conn_map, struct flow_tuple *flow_id, struct flow_infos *flow_info, int key, uint64_t cur_time) {
-	struct srh_record_t *srh_record;
-	int rv;
+static __always_inline uint32_t get_better_dest_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, struct params_better_path *args) {
+	uint64_t lowest_bp = 0;
+	uint32_t lowest_id = 0, current_bp = 0;
+	struct srh_record_t *srh_record = NULL;
+	unsigned int firsti = 1;
+	struct dst_infos *dst_infos = NULL;
+	int self_allowed = args->self_allowed;
+	struct ip6_addr_t *dst_addr = args->dst_addr;
 
-	/* Get the infos for the current path and remove our bw */
-	srh_record = (void *)bpf_map_lookup_elem(&srh_map, &flow_info->srh_id);
-	if (srh_record) {
-		srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
-		bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+
+	dst_infos = (void *) bpf_map_lookup_elem(dt_map, dst_addr);
+	if (!dst_infos) {
+		bpf_debug("Cannot find the destination entry => Cannot find another SRH\n");
+		return lowest_id;
 	}
 
-	/* Then move to the next path */
-	srh_record = (void *)bpf_map_lookup_elem(&srh_map, &key);
-	if (srh_record) {
-		rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
-				&srh_record->srh, 72);
-		if (!rv) {
-			/* Update flow informations */
-			flow_info->srh_id = key;
-			flow_info->last_move_time = cur_time;
-			flow_info->first_loss_time = 0;
-			flow_info->number_of_loss = 0;
-			bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
-
-			/* Update the new path bw */
-			srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw;
-			bpf_map_update_elem(&srh_map, &flow_info->srh_id, srh_record, BPF_ANY);
+	if (lowest_id >=0 && lowest_id < MAX_SRH_BY_DEST) {
+		srh_record = &dst_infos->srhs[lowest_id];
+		if (!srh_record) {
+			bpf_debug("Cannot find the SRH entry\n");
+		} else {
+			lowest_bp = srh_record->curr_bw;
 		}
 	}
-	return rv;
-}
 
-struct bpf_elf_map SEC("maps") srh_map = {
-	.type		= BPF_MAP_TYPE_ARRAY,
-	.size_key	= sizeof(uint32_t),
-	.size_value	= 16 + 72,
-	.pinning	= PIN_NONE,
-	.max_elem	= MAX_SRH,
-};
+	#pragma clang loop unroll(full)
+	for (unsigned int i = firsti; i < MAX_SRH_BY_DEST; i++) {
+		int j = i; // Compiler cannot unroll otherwise
+		srh_record = &dst_infos->srhs[i];
+
+		// Wrong SRH ID -> might be inconsistent state, so skip
+		if (!srh_record || !srh_record->srh.type) {
+			bpf_debug("Cannot find the SRH entry indexed at a dest entry\n");
+			continue;
+		}
+
+		if (!srh_record->is_valid) {
+			bpf_debug("SRH entry indexed by the dest entry is invalid\n");
+			continue; // Not a valid SRH for the destination
+		}
+
+		if (!self_allowed && srh_record->srh_id == flow_info->srh_id)
+			continue;
+
+		current_bp = srh_record->curr_bw;
+		bpf_debug("current bp: %lu\n", current_bp);
+		if (current_bp < lowest_bp) {
+			lowest_bp = current_bp;
+			lowest_id = i;
+		}
+
+	}
+	return lowest_id;
+}
 
 struct bpf_elf_map SEC("maps") conn_map = {
 	.type		= BPF_MAP_TYPE_HASH,
 	.size_key	= sizeof(struct flow_tuple),
 	.size_value	= sizeof(struct flow_infos),
+	.pinning	= PIN_NONE,
+	.max_elem	= MAX_FLOWS,
+};
+
+struct bpf_elf_map SEC("maps") dest_map = {
+	.type		= BPF_MAP_TYPE_HASH,
+	.size_key	= sizeof(unsigned long long),  // XXX Only looks at the most significant 64 bits of the address
+	.size_value	= sizeof(struct dst_infos),
 	.pinning	= PIN_NONE,
 	.max_elem	= MAX_FLOWS,
 };

@@ -19,8 +19,9 @@ mkdir /sys/fs/cgroup/unified/test.slice
 
 # loading the program
 #./bpftool prog load ./ebpf_hhf.o /sys/fs/bpf/hhf_acc type cgroup/skb
-./bpftool prog load ./ebpf_socks_hhf.o /sys/fs/bpf/hhf_socks type sockops 
+#./bpftool prog load ./ebpf_socks_hhf.o /sys/fs/bpf/hhf_socks type sockops 
 #./bpftool prog load ./tcp_basertt_kern.o /sys/fs/bpf/prog type sockops 
+./bpftool prog load ./ebpf_socks_ecn.o /sys/fs/bpf/hhf_socks type sockops 
 
 SOCKOPTID=`./bpftool prog  | grep handle_sockop | awk '{print $1} ' | sed -e 's/://g'`
 
