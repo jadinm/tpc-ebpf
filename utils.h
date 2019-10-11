@@ -68,6 +68,7 @@ struct srh_record_t {
 	__u32 srh_id;
 	__u32 is_valid;
 	__u64 curr_bw; 
+	__u64 delay; // ms
 	struct ip6_srh_t srh;
 } __attribute__((packed));
 
@@ -124,8 +125,8 @@ static __always_inline void get_flow_id_from_sock(struct flow_tuple *flow_id, st
 }
 
 static __always_inline uint32_t get_best_dest_path(struct bpf_elf_map *dt_map, struct ip6_addr_t *dst_addr) {
-	uint64_t lowest_bp = 0;
-	uint32_t lowest_id = 0, current_bp = 0;
+	uint64_t lowest_delay = 0;
+	uint32_t lowest_id = 0, current_delay = 0;
 	struct srh_record_t *srh_record = NULL;
 	unsigned int firsti = 1;
 	struct dst_infos *dst_infos = NULL;
@@ -142,7 +143,7 @@ static __always_inline uint32_t get_best_dest_path(struct bpf_elf_map *dt_map, s
 		if (!srh_record) {
 			bpf_debug("Cannot find the SRH entry\n");
 		} else {
-			lowest_bp = srh_record->curr_bw;
+			lowest_delay = srh_record->delay;
 		}
 	}
 
@@ -153,19 +154,19 @@ static __always_inline uint32_t get_best_dest_path(struct bpf_elf_map *dt_map, s
 
 		// Wrong SRH ID -> might be inconsistent state, so skip
 		if (!srh_record || !srh_record->srh.type) {
-			bpf_debug("Cannot find the SRH entry indexed at a dest entry\n");
+			bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
 			continue;
 		}
 
 		if (!srh_record->is_valid) {
-			bpf_debug("SRH entry indexed by the dest entry is invalid\n");
+			bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
 			continue; // Not a valid SRH for the destination
 		}
 
-		current_bp = srh_record->curr_bw;
-		bpf_debug("current bp: %lu\n", current_bp);
-		if (current_bp < lowest_bp) {
-			lowest_bp = current_bp;
+		current_delay = srh_record->delay;
+		bpf_debug("current delay: %lu\n", current_delay);
+		if (current_delay < lowest_delay) {
+			lowest_delay = current_delay;
 			lowest_id = i;
 		}
 
@@ -173,15 +174,12 @@ static __always_inline uint32_t get_best_dest_path(struct bpf_elf_map *dt_map, s
 	return lowest_id;
 }
 
-static __always_inline uint32_t get_better_dest_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, struct params_better_path *args) {
-	uint64_t lowest_bp = 0;
-	uint32_t lowest_id = 0, current_bp = 0;
+static __always_inline uint32_t get_better_dest_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, int self_allowed, __u32 *dst_addr) {
+	uint64_t lowest_delay = 0;
+	uint32_t lowest_id = flow_info->srh_id, current_delay = 0;
 	struct srh_record_t *srh_record = NULL;
-	unsigned int firsti = 1;
+	unsigned int firsti = 0;
 	struct dst_infos *dst_infos = NULL;
-	int self_allowed = args->self_allowed;
-	struct ip6_addr_t *dst_addr = args->dst_addr;
-
 
 	dst_infos = (void *) bpf_map_lookup_elem(dt_map, dst_addr);
 	if (!dst_infos) {
@@ -194,7 +192,7 @@ static __always_inline uint32_t get_better_dest_path(struct bpf_elf_map *dt_map,
 		if (!srh_record) {
 			bpf_debug("Cannot find the SRH entry\n");
 		} else {
-			lowest_bp = srh_record->curr_bw;
+			lowest_delay = srh_record->delay;
 		}
 	}
 
@@ -205,22 +203,22 @@ static __always_inline uint32_t get_better_dest_path(struct bpf_elf_map *dt_map,
 
 		// Wrong SRH ID -> might be inconsistent state, so skip
 		if (!srh_record || !srh_record->srh.type) {
-			bpf_debug("Cannot find the SRH entry indexed at a dest entry\n");
+			bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
 			continue;
 		}
 
 		if (!srh_record->is_valid) {
-			bpf_debug("SRH entry indexed by the dest entry is invalid\n");
+			bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
 			continue; // Not a valid SRH for the destination
 		}
 
 		if (!self_allowed && srh_record->srh_id == flow_info->srh_id)
 			continue;
 
-		current_bp = srh_record->curr_bw;
-		bpf_debug("current bp: %lu\n", current_bp);
-		if (current_bp < lowest_bp) {
-			lowest_bp = current_bp;
+		current_delay = srh_record->delay;
+		bpf_debug("current delay: %lu\n", current_delay);
+		if (current_delay < lowest_delay || (!self_allowed && lowest_id == flow_info->srh_id)) {
+			lowest_delay = current_delay;
 			lowest_id = i;
 		}
 
