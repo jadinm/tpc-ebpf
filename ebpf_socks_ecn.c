@@ -26,6 +26,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	struct flow_tuple flow_id;
 	struct params_better_path args_bp;
 	char srh_buf[72]; // room for 4 segment
+	char dest_addr_buf[255];
 
 	int op;
 	int rv = 0;
@@ -43,12 +44,12 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	get_flow_id_from_sock(&flow_id, skops);
 	flow_info = (void *)bpf_map_lookup_elem(&conn_map, &flow_id);
 
-	if (!flow_info) {
+	if (!flow_info) {  // TODO Problem if listening connections => no destination defined !!!
 		int ret;
 		struct flow_infos new_flow;
 
 		bpf_debug("flow not found, adding it\n");
-		new_flow.srh_id = get_best_dest_path(&dest_map, (struct ip6_addr_t *) &flow_id.remote_addr);
+		new_flow.srh_id = get_best_dest_path(&dest_map, (struct ip6_addr_t *) flow_id.remote_addr);
 		bpf_debug("Select path ID : %lu\n", new_flow.srh_id);
 		new_flow.last_reported_bw = 0;
 		new_flow.sample_start_time = cur_time;
@@ -72,11 +73,11 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			// This flow is closed, cleanup the maps
 			if (skops->args[1] == BPF_TCP_CLOSE) {
 				// Remove the bw this flow occupied
-				dst_infos = (void *)bpf_map_lookup_elem(&dest_map, &flow_id.remote_addr);
+				dst_infos = (void *)bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 				if (dst_infos && flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
 					srh_record = &dst_infos->srhs[flow_info->srh_id];
-					srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
-					bpf_map_update_elem(&dest_map, &flow_id.remote_addr, dst_infos, BPF_ANY);
+					//srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;  // TODO Problem if no more bandwidth and we took that out of despair
+					bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
 				}
 				// Delete the flow from the flows map
 				bpf_map_delete_elem(&conn_map, &flow_id);
@@ -89,31 +90,33 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			//bpf_debug("currtime: %llu start time : %llu\n", cur_time, flow_info->sample_start_time);
 			//bpf_debug("una: %lu, start: %lu, bytes envoyes : %lu\n",skops->snd_una, flow_info->sample_start_bytes, skops->snd_una - flow_info->sample_start_bytes);
 			// More than 1/10 second has passed, let's check
-			if ((cur_time - flow_info->sample_start_time) >= 100000000) {
+			//if ((cur_time - flow_info->sample_start_time) >= 100000000) {
 			//	uint64_t factor = (cur_time - flow_info->sample_start_time)/100000000;
-				uint64_t factor = (((cur_time - flow_info->sample_start_time)) + 100000000/2)/100000000;
-				uint32_t bytes_sent = skops->snd_una - flow_info->sample_start_bytes;
-				uint32_t bw = (((bytes_sent)/factor));
+			//	uint64_t factor = (((cur_time - flow_info->sample_start_time)) + 100000000/2)/100000000;
+			//	uint32_t bytes_sent = skops->snd_una - flow_info->sample_start_bytes;
+				//uint32_t bw = (((bytes_sent)/factor));
 				//bpf_debug("start: %llu curr: %llu factor: %lu\n",flow_info->sample_start_time, cur_time, factor);
 				//bpf_debug("Estimated bw: %lu (bytes sent: %lu)\n", bw, bytes_sent);
-				dst_infos = (void *)bpf_map_lookup_elem(&dest_map, &flow_id.remote_addr);
-				if (dst_infos && flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
-					srh_record = &dst_infos->srhs[flow_info->srh_id];
-					srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
-					srh_record->curr_bw = srh_record->curr_bw + bw;
-					flow_info->sample_start_time = cur_time;
-					flow_info->sample_start_bytes = skops->snd_una;
-					flow_info->last_reported_bw = bw;
-					bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
-					bpf_map_update_elem(&dest_map, &flow_id.remote_addr, dst_infos, BPF_ANY);
-				}
-			}
+				//dst_infos = (void *) bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
+				//if (dst_infos && flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
+					// srh_record = &dst_infos->srhs[flow_info->srh_id];
+					//srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw; // TODO Problem if no more bandwidth and we took that out of despair
+					//srh_record->curr_bw = srh_record->curr_bw + bw; // TODO Problem if no more bandwidth and we took that out of despair
+			//		flow_info->sample_start_time = cur_time;
+			//		flow_info->sample_start_bytes = skops->snd_una;
+			//		flow_info->last_reported_bw = bw;
+			//		bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+					// bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
+				//}
+			//}
 			break;
 		case BPF_SOCK_OPS_UDP_XMIT:
 			break;
 		case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+			bpf_debug("Active established !!!\n");
 		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
 			//bpf_debug("Una initial: %lu\n", skops->snd_una);
+			bpf_debug("Passive or active established !!!\n");
 			flow_info->sample_start_time = cur_time;
 			flow_info->sample_start_bytes = skops->snd_una;
 			bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
@@ -122,7 +125,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		case BPF_SOCK_OPS_TCP_CONNECT_CB:
 			bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_STATE_CB_FLAG); // TCP State change
 			//bpf_sock_ops_cb_flags_set(skops, (BPF_SOCK_OPS_RETRANS_CB_FLAG|BPF_SOCK_OPS_RTO_CB_FLAG));
-			dst_infos = (void *)bpf_map_lookup_elem(&dest_map, &flow_id.remote_addr);
+			dst_infos = (void *)bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 			if (dst_infos && flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
 				srh_record = &dst_infos->srhs[flow_info->srh_id];
 				rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR,
@@ -138,25 +141,24 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			if ((cur_time - flow_info->last_move_time) < 3000000000)
 				break;
 
-			args_bp.self_allowed = 0;
-			args_bp.dst_addr = (struct ip6_addr_t *) &flow_id.remote_addr;
-			bpf_debug("Congestion experienced - Try to change\n");
-			key = get_better_dest_path(&dest_map, flow_info, &args_bp);
-			bpf_debug("Congestion experienced - Try to change (2)\n");
+			bpf_debug("Congestion experienced - Try to change from %u\n", flow_info->srh_id);
+			key = get_better_dest_path(&dest_map, flow_info, 0, flow_id.remote_addr);
+			bpf_debug("Congestion experienced 2 - Try to change from %u to %u\n", flow_info->srh_id, key);
 
 			// This can't be helped
 			if (key == flow_info->srh_id)
 				break;
-			bpf_debug("Congestion experienced - Changing in progress\n");
+			bpf_debug("Congestion experienced 3 - Changing in progress\n");
 
 			// Get the infos for the current path and remove our bw
-			dst_infos = (void *)bpf_map_lookup_elem(&dest_map, &flow_id.remote_addr);
+			dst_infos = (void *)bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 			if (dst_infos) {
+				bpf_debug("Congestion experienced 4 - dst_infos found!\n");
 				// Check needed to avoid verifier complaining about unbounded access
 				if(flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
 					srh_record = &dst_infos->srhs[flow_info->srh_id];
-					srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
-					bpf_map_update_elem(&dest_map, &flow_id.remote_addr, dst_infos, BPF_ANY);
+					//srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw; // TODO Problem if no more bandwidth and we took that out of despair
+					bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
 				}
 
 				// Then move to the next path
@@ -177,10 +179,11 @@ int handle_sockop(struct bpf_sock_ops *skops)
 						bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 
 						// Update the new path bw
-						srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw;
-						bpf_map_update_elem(&dest_map, &flow_id.remote_addr, dst_infos, BPF_ANY);
+						//srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw; // TODO Problem if no more bandwidth and we took that out of despair
+						bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
+						bpf_debug("Congestion experienced 7 - after updating flow info\n");
 					}
-					bpf_debug("Congestion experienced - Change finished !\n");
+					bpf_debug("Congestion experienced 8 - Change finished !\n");
 				}
 			}
 			break;
@@ -231,7 +234,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 				// Try a different path
 				args_bp.self_allowed = 0;
-				args_bp.dst_addr = (struct ip6_addr_t *) &flow_id.remote_addr;
+				args_bp.dst_addr = (struct ip6_addr_t *) flow_id.remote_addr;
 				key = get_better_dest_path(&dest_map, flow_info, &args_bp);
 
 				// Couldn't get a best path, too bad, nothing we can do
@@ -240,12 +243,12 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			}
 
 			// First, remove our info from the previous path
-			dst_infos = (void *)bpf_map_lookup_elem(&dest_map, &flow_id.remote_addr);
+			dst_infos = (void *)bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 			if (dst_infos) {
 				if (flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
 					srh_record = &dst_infos->srhs[flow_info->srh_id];
-					srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;
-					bpf_map_update_elem(&dest_map, &flow_id.remote_addr, dst_infos, BPF_ANY);
+					//srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw; // TODO Problem if no more bandwidth and we took that out of despair
+					bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
 				}
 
 				// Then move to the next path
@@ -262,8 +265,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 						bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 
 						// Update the new path bw
-						srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw;
-						bpf_map_update_elem(&dest_map, &flow_id.remote_addr, dst_infos, BPF_ANY);
+						//srh_record->curr_bw = srh_record->curr_bw + flow_info->last_reported_bw; // TODO Problem if no more bandwidth and we took that out of despair
+						bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
 					}
 				}
 			}
