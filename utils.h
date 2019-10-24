@@ -13,6 +13,9 @@
 #define MAX_SRH_BY_DEST 4
 #define MAX_SEGS_NBR	4
 
+#define WAIT_BEFORE_INITIAL_MOVE 1000000000 // 1 sec
+#define WAIT_BACKOFF 2 // Multiply by two the waiting time whenever a path change is made
+
 /* eBPF definitions */
 #ifndef __section
 # define __section(NAME)                  \
@@ -86,6 +89,8 @@ struct flow_infos {
 	__u64 sample_start_time;
 	__u32 sample_start_bytes;
 	__u64 last_move_time;
+	__u64 wait_backoff_max; // current max wating time
+	__u64 wait_before_move; // current waiting time
 	__u64 first_loss_time;
 	__u32 number_of_loss;
 } __attribute__((packed));
@@ -154,12 +159,12 @@ static __always_inline uint32_t get_best_dest_path(struct bpf_elf_map *dt_map, s
 
 		// Wrong SRH ID -> might be inconsistent state, so skip
 		if (!srh_record || !srh_record->srh.type) {
-			bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
+			//bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
 			continue;
 		}
 
 		if (!srh_record->is_valid) {
-			bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
+			//bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
 			continue; // Not a valid SRH for the destination
 		}
 
@@ -203,12 +208,12 @@ static __always_inline uint32_t get_better_dest_path(struct bpf_elf_map *dt_map,
 
 		// Wrong SRH ID -> might be inconsistent state, so skip
 		if (!srh_record || !srh_record->srh.type) {
-			bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
+			//bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
 			continue;
 		}
 
 		if (!srh_record->is_valid) {
-			bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
+			//bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
 			continue; // Not a valid SRH for the destination
 		}
 
