@@ -228,6 +228,18 @@ static void *(*bpf_sk_storage_get)(void *map, struct bpf_sock *sk,
 static int (*bpf_sk_storage_delete)(void *map, struct bpf_sock *sk) =
 	(void *)BPF_FUNC_sk_storage_delete;
 static int (*bpf_send_signal)(unsigned sig) = (void *)BPF_FUNC_send_signal;
+static int (*bpf_to_floating)(__u32 integer, __u32 decimal, __u32 digits, floating *result, __u32 result_len) =
+	(void *) BPF_FUNC_to_floating;
+static int (*bpf_floating_to_u32s)(floating *number, __u32 number_len, __u64 *int_dec, __u32 int_dec_len) =
+	(void *) BPF_FUNC_floating_to_u32s;
+static int (*bpf_floating_add)(floating *terms, __u32 terms_len, floating *result, __u32 result_len) =
+	(void *) BPF_FUNC_floating_add;
+static int (*bpf_floating_multiply)(floating *factors, __u32 factors_len, floating *result, __u32 result_len) =
+	(void *) BPF_FUNC_floating_multiply;
+static int (*bpf_floating_divide)(floating *operands, __u32 operands_len, floating *result, __u32 result_len) =
+	(void *) BPF_FUNC_floating_divide;
+static int (*bpf_floating_e_power_a)(floating *exponent, __u32 exponent_len, floating *result, __u32 result_len) =
+	(void *) BPF_FUNC_floating_e_power_a;
 
 /* llvm builtin functions that eBPF C program may use to
  * emit BPF_LD_ABS and BPF_LD_IND instructions
