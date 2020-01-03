@@ -40,7 +40,7 @@ static __always_inline int move_path(struct dst_infos *dst_infos, __u32 key, str
 static __always_inline void update_flow_timers(struct flow_infos *flow_info, struct dst_infos *dst_infos)
 {
 	// Timers
-	__u64 ecn_time = 0; // TODO Try ebpf random function
+	__u64 ecn_time = 0;
 	ecn_time = ((__u64) bpf_get_prandom_u32()) * 1000;
 	if (ecn_time >= 0 && ecn_time <= __UINT64_MAX__ - 1 && flow_info->wait_backoff_max >= 0 && flow_info->wait_backoff_max <= __UINT64_MAX__ - 1) {
 		ecn_time = (ecn_time % flow_info->wait_backoff_max) + 1;
@@ -61,7 +61,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	struct dst_infos *dst_infos;
 	struct flow_infos *flow_info;
 	struct flow_tuple flow_id;
-	floating float_tmp;
 
 	int op;
 	int rv = 0;
@@ -96,28 +95,17 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		new_flow.last_ecn_rtt = 0;
 		new_flow.exp3_last_number_actions = 0;
 		new_flow.exp3_curr_reward = 0;
-		new_flow.exp3_last_probability.mantissa = 1 << 31;
+		// Inititialize to 1 EXP3 weight and probabilities
+		new_flow.exp3_last_probability.mantissa = LARGEST_BIT;
 		new_flow.exp3_last_probability.exponent = 0;
-		//__u32 integer_prob = 0;
-		//__u32 decimal_prob = 0;
-		//floating_to_u32s(new_flow.exp3_last_probability, &integer_prob, &decimal_prob);
-		//bpf_debug("Init flow Last proba: %u.0*%u\n", integer_prob, decimal_prob);
-		//bpf_debug("Init flow MAX_SRH_BY_DEST %u\n", MAX_SRH_BY_DEST);
-		floating max_paths;
-		to_floating(MAX_SRH_BY_DEST - 1, 0, 1, &max_paths);
-		//__u32 integer_weight = 0;
-		//__u32 decimal_weight = 0;
-		new_flow.exp3_weigth_mantissa_0 = 1; //TODO This fails !!!! // float_tmp.mantissa;
-		new_flow.exp3_weigth_exponent_0 = 0; //float_tmp.exponent;
-		new_flow.exp3_weigth_mantissa_1 = 1; //TODO This fails !!!! // float_tmp.mantissa;
-		new_flow.exp3_weigth_exponent_1 = 0; //float_tmp.exponent;
-		new_flow.exp3_weigth_mantissa_2 = 1; //TODO This fails !!!! // float_tmp.mantissa;
-		new_flow.exp3_weigth_exponent_2 = 0; //float_tmp.exponent;
-		new_flow.exp3_weigth_mantissa_3 = 1; //TODO This fails !!!! // float_tmp.mantissa;
-		new_flow.exp3_weigth_exponent_3 = 0; //float_tmp.exponent;
-		//bpf_debug("Init flow weight %u\n", j);
-		//floating_to_u32s(new_flow.exp3_weigths[j], &integer_weight, &decimal_weight);
-		//bpf_debug("Debug mantissa: %llu\n", float_tmp.mantissa);
+		new_flow.exp3_weigth_mantissa_0 = LARGEST_BIT;
+		new_flow.exp3_weigth_exponent_0 = 0;
+		new_flow.exp3_weigth_mantissa_1 = LARGEST_BIT;
+		new_flow.exp3_weigth_exponent_1 = 0;
+		new_flow.exp3_weigth_mantissa_2 = LARGEST_BIT;
+		new_flow.exp3_weigth_exponent_2 = 0;
+		new_flow.exp3_weigth_mantissa_3 = LARGEST_BIT;
+		new_flow.exp3_weigth_exponent_3 = 0;
 		// Timers
 		new_flow.wait_backoff_max = WAIT_BEFORE_INITIAL_MOVE;
 		dst_infos = (void *) bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
@@ -136,7 +124,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			return 1;
 		//bpf_debug("Flow path is correctly entered !\n");
 		//bpf_debug("Select path ID : %lu - src %u.%u\n", new_flow.srh_id, flow_id.local_addr[0], flow_id.local_addr[1]);
-		//floating_test_all(); // TODO Remove
 	}
 
 	//bpf_debug("segs_out: %lu packets: %lu interval: %lu\n", skops->segs_out, skops->rate_delivered, skops->rate_interval_us);
@@ -146,12 +133,12 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			// This flow is closed, cleanup the maps
 			if (skops->args[1] == BPF_TCP_CLOSE) {
 				// Remove the bw this flow occupied
-				dst_infos = (void *)bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
+				/*dst_infos = (void *)bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 				if (dst_infos && flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
 					srh_record = &dst_infos->srhs[flow_info->srh_id];
 					//srh_record->curr_bw = srh_record->curr_bw - flow_info->last_reported_bw;  // TODO Problem if no more bandwidth and we took that out of despair
 					bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
-				}
+				}*/
 				// Delete the flow from the flows map
 				bpf_map_delete_elem(&conn_map, &flow_id);
 			}
@@ -229,7 +216,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 			// We already moved less than X seconds ago... do nothing
 			if (flow_info->ecn_count < 3 || (cur_time - flow_info->last_move_time) < flow_info->wait_before_move) {
-				// TODO Remove if ((cur_time - flow_info->last_move_time) < 3000000000)
 				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 				if (rv)
 					return 1;

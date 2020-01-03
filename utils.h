@@ -28,8 +28,9 @@
 #define FLOAT_MULT 1000000000
 
 // Exp3 GAMMA
-#define GAMMA(x) to_floating(0, 5, 1, &x) // 0.5
-#define GAMMA_REV(x) to_floating(2, 0, 1, &x) // 2
+#define GAMMA(x) bpf_to_floating(0, 5, 1, &x, sizeof(floating)) // 0.5
+#define GAMMA_REV(x) bpf_to_floating(2, 0, 1, &x, sizeof(floating)) // 1/0.5 = 2
+#define ONE_MINUS_GAMMA(x) bpf_to_floating(0, 5, 1, &x, sizeof(floating)) // 1 - 0.5 = 0.5
 
 /* eBPF definitions */
 #ifndef __section
@@ -180,7 +181,8 @@ struct bpf_elf_map {
 	__u32 pinning;
 } __attribute__((packed));
 
-static void get_flow_id_from_sock(struct flow_tuple *flow_id, struct bpf_sock_ops *skops) {
+static void get_flow_id_from_sock(struct flow_tuple *flow_id, struct bpf_sock_ops *skops)
+{
 	flow_id->family = skops->family;
 	flow_id->local_addr[0] = skops->local_ip6[0];
 	flow_id->local_addr[1] = skops->local_ip6[1];
@@ -194,109 +196,8 @@ static void get_flow_id_from_sock(struct flow_tuple *flow_id, struct bpf_sock_op
 	flow_id->remote_port = bpf_ntohl(skops->remote_port);
 }
 
-/*static __always_inline uint32_t get_best_dest_path(struct bpf_elf_map *dt_map, struct ip6_addr_t *dst_addr) {
-	uint64_t lowest_delay = 0;
-	uint32_t lowest_id = 0, current_delay = 0;
-	struct srh_record_t *srh_record = NULL;
-	unsigned int firsti = 1;
-	struct dst_infos *dst_infos = NULL;
-
-
-	dst_infos = (void *) bpf_map_lookup_elem(dt_map, dst_addr);
-	if (!dst_infos) {
-		//bpf_debug("Cannot find the destination entry => Cannot find another SRH\n");
-		return lowest_id;
-	}
-
-	if (lowest_id >=0 && lowest_id < MAX_SRH_BY_DEST) {
-		srh_record = &dst_infos->srhs[lowest_id];
-		if (!srh_record) {
-			//bpf_debug("Cannot find the SRH entry\n");
-		} else {
-			lowest_delay = srh_record->delay;
-		}
-	}
-
-	//#pragma clang loop unroll(full)
-	for (unsigned int i = firsti; i <= MAX_SRH_BY_DEST - 1; i++) {
-		int j = i; // Compiler cannot unroll otherwise
-		srh_record = &dst_infos->srhs[i];
-
-		// Wrong SRH ID -> might be inconsistent state, so skip
-		if (!srh_record || !srh_record->srh.type) {
-			//bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
-			continue;
-		}
-
-		if (!srh_record->is_valid) {
-			//bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
-			continue; // Not a valid SRH for the destination
-		}
-
-		current_delay = srh_record->delay;
-		bpf_debug("current delay: %lu\n", current_delay);
-		if (current_delay < lowest_delay) {
-			lowest_delay = current_delay;
-			lowest_id = i;
-		}
-
-	}
-	return lowest_id;
-}*/
-
-/*static uint32_t get_better_dest_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, int self_allowed, __u32 *dst_addr) {
-	uint64_t lowest_delay = 0;
-	uint32_t lowest_id = flow_info->srh_id, current_delay = 0;
-	struct srh_record_t *srh_record = NULL;
-	unsigned int firsti = 0;
-	struct dst_infos *dst_infos = NULL;
-
-	dst_infos = (void *) bpf_map_lookup_elem(dt_map, dst_addr);
-	if (!dst_infos) {
-		//bpf_debug("Cannot find the destination entry => Cannot find another SRH\n");
-		return lowest_id;
-	}
-
-	if (lowest_id >=0 && lowest_id < MAX_SRH_BY_DEST) {
-		srh_record = &dst_infos->srhs[lowest_id];
-		if (!srh_record) {
-			//bpf_debug("Cannot find the SRH entry\n");
-		} else {
-			lowest_delay = srh_record->delay;
-		}
-	}
-
-	#pragma clang loop unroll(full)
-	for (unsigned int i = firsti; i < MAX_SRH_BY_DEST; i++) {
-		int j = i; // Compiler cannot unroll otherwise
-		srh_record = &dst_infos->srhs[i];
-
-		// Wrong SRH ID -> might be inconsistent state, so skip
-		if (!srh_record || !srh_record->srh.type) {
-			//bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
-			continue;
-		}
-
-		if (!srh_record->is_valid) {
-			//bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
-			continue; // Not a valid SRH for the destination
-		}
-
-		if (!self_allowed && srh_record->srh_id == flow_info->srh_id)
-			continue;
-
-		current_delay = srh_record->delay;
-		bpf_debug("current delay: %lu\n", current_delay);
-		if (current_delay < lowest_delay || (!self_allowed && lowest_id == flow_info->srh_id)) {
-			lowest_delay = current_delay;
-			lowest_id = i;
-		}
-
-	}
-	return lowest_id;
-}*/
-
-static __always_inline void exp3_reward_path(struct flow_infos *flow_info) {
+static __always_inline void exp3_reward_path(struct flow_infos *flow_info)
+{
 	/*
 	theReward = reward(choice, t)
 	weights[choice] *= math.exp(theReward / (probabilityDistribution[choice] * gamma_rev * numActions)) # important that we use estimated reward here!
@@ -309,18 +210,29 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info) {
 	floating exponent;
 	floating weight_factor;
 	floating float_tmp, float_tmp2;
+	floating operands[2];
 
 	GAMMA_REV(gamma_rev);
 
-	to_floating(flow_info->exp3_curr_reward, 0, 1, &reward); // TODO Compute reward
-	to_floating(flow_info->exp3_last_number_actions, 1, 0, &nbr_actions);
-	floating_multiply(flow_info->exp3_last_probability, gamma_rev, &exponent_den_factor);
-	floating_multiply(exponent_den_factor, nbr_actions, &exponent_den);
-	floating_divide(reward, exponent_den, &exponent);
-	float_e_power_a(exponent, &weight_factor);
+	bpf_to_floating(flow_info->exp3_curr_reward, 0, 1, &reward, sizeof(floating)); // TODO Compute reward
+	bpf_to_floating(flow_info->exp3_last_number_actions, 1, 0, &nbr_actions, sizeof(floating));
+
+	set_floating(operands[0], flow_info->exp3_last_probability);
+	set_floating(operands[1], gamma_rev);
+	bpf_floating_multiply(operands, sizeof(floating) * 2, &exponent_den_factor, sizeof(floating));
+
+	set_floating(operands[0], exponent_den_factor);
+	set_floating(operands[1], nbr_actions);
+	bpf_floating_multiply(operands, sizeof(floating) * 2, &exponent_den, sizeof(floating));
+
+	set_floating(operands[0], reward);
+	set_floating(operands[1], exponent_den);
+	bpf_floating_divide(operands, sizeof(floating) * 2, &exponent, sizeof(floating));
+
+	bpf_floating_e_power_a(&exponent, sizeof(floating), &weight_factor, sizeof(floating));
 	// TODO Remove
-	flow_info->exp3_weigth_mantissa_1 = weight_factor.mantissa;
-	flow_info->exp3_weigth_exponent_1 = weight_factor.exponent;
+	//flow_info->exp3_weigth_mantissa_1 = weight_factor.mantissa;
+	//flow_info->exp3_weigth_exponent_1 = weight_factor.exponent;
 	//weight_factor.mantissa = exponent.mantissa;
 	//weight_factor.exponent = exponent.exponent;
 	// TODO Remove
@@ -329,13 +241,16 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info) {
 	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) { // Always true but this is for eBPF loader
 		exp3_weigth_mantissa_get(flow_info, idx, float_tmp.mantissa);
 		exp3_weigth_exponent_get(flow_info, idx, float_tmp.exponent);
-		floating_multiply(float_tmp, weight_factor, &float_tmp2);
+		set_floating(operands[0], float_tmp);
+		set_floating(operands[1], weight_factor);
+		bpf_floating_multiply(operands, sizeof(floating) * 2, &float_tmp2, sizeof(floating));
 		exp3_weigth_mantissa_set(flow_info, idx, float_tmp2.mantissa);
 		exp3_weigth_exponent_set(flow_info, idx, float_tmp2.exponent);
 	}
 }
 
-static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, __u32 *dst_addr) {
+static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, __u32 *dst_addr)
+{
 	/*
 	def distr(weights, gamma=0.0):
 		theSum = float(sum(weights))
@@ -356,6 +271,7 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 			yield choice, theReward, estimatedReward, weights
 			t = t + 1
 	*/
+	floating operands[2];
 	floating gamma;
 	GAMMA(gamma);
 
@@ -373,8 +289,8 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 	exp3_reward_path(flow_info);
 
 	// Compute the sum of weights
-	/*floating sum;
-	to_floating(0, 0, 1, &sum);
+	floating sum;
+	bpf_to_floating(0, 0, 1, &sum, sizeof(floating));
 	__u32 nbr_valid_paths = 0;
 	#pragma clang loop unroll(full)
 	for (__u32 i = 0; i <= MAX_SRH_BY_DEST - 1; i++) {
@@ -398,27 +314,30 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 			continue;
 		}
 
-		floating_add(sum, flow_info->exp3_weigths[xxx], &sum);
+		set_floating(operands[0], sum);
+		exp3_weigth_mantissa_get(flow_info, xxx, operands[1].mantissa);
+		exp3_weigth_exponent_get(flow_info, xxx, operands[1].exponent);
+		bpf_floating_add(operands, sizeof(floating) * 2, &sum, sizeof(floating));
 		nbr_valid_paths += 1;
-	}*/
+	}
 
 	// TODO Compute the probabilities
-	/*floating probability;
-	floating one;
-	to_floating(1, 0, 1, &one);
+	floating probability;
 	floating one_minus_gamma;
-	floating_add(one, gamma, &one_minus_gamma);
+	ONE_MINUS_GAMMA(one_minus_gamma);
 	floating weight_times_gama;
 	floating term1;
 	floating valid_paths;
-	to_floating(nbr_valid_paths, 0, 1, &valid_paths);
+	bpf_to_floating(nbr_valid_paths, 0, 1, &valid_paths, sizeof(floating));
 	floating term2;
-	floating_divide(gamma, valid_paths, &term2);
+
+	set_floating(operands[0], gamma);
+	set_floating(operands[1], valid_paths);
+	bpf_floating_divide(operands, sizeof(floating) * 2, &term2, sizeof(floating));
 
 	__u64 pick = ((__u64) bpf_get_prandom_u32()) % FLOAT_MULT; // No problem if FLOAT_MULT < UIN32T_MAX
 	__u64 accumulator = 0;
-	__u32 integer_part;
-	__u32 decimal_part;
+	__u32 decimal[2];
 
 	#pragma clang loop unroll(full)
 	for (__u32 i = 0; i <= MAX_SRH_BY_DEST - 1; i++) {
@@ -443,22 +362,30 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 		}
 
 		// prob[i] = (1.0 - gamma) * (w[i] / theSum) + (gamma / len(weights))
-		floating_multiply(one_minus_gamma, flow_info->exp3_weigths[yyy], &term1); // TODO , &weight_times_gama);
-		//floating_divide(weight_times_gama, sum, &term1); // TODO Instructions that makes everything overflow
-		floating_add(term1, term2, &probability);
-*/
-		/*floating_to_u32s(probability, &integer_part, &decimal_part);
-		accumulator += decimal_part; // No need to take the integer part since these are numbers in [0, 1[
+		set_floating(operands[0], one_minus_gamma);
+		exp3_weigth_mantissa_get(flow_info, yyy, operands[1].mantissa);
+		exp3_weigth_exponent_get(flow_info, yyy, operands[1].exponent);
+		bpf_floating_multiply(operands, sizeof(floating) * 2, &weight_times_gama, sizeof(floating));
+
+		set_floating(operands[0], weight_times_gama);
+		set_floating(operands[1], sum);
+		bpf_floating_divide(operands, sizeof(floating) * 2, &term1, sizeof(floating));
+
+		set_floating(operands[0], term1);
+		set_floating(operands[1], term2);
+		bpf_floating_add(operands, sizeof(floating) * 2, &probability, sizeof(floating));
+
+		bpf_floating_to_u32s(&probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));
+		accumulator += decimal[1]; // No need to take the integer part since these are numbers in [0, 1[
 		if (pick < accumulator) {
 			// We found the chosen one
 			chosen_id = i;
-			flow_info->exp3_last_probability.mantissa = probability.mantissa;
-			flow_info->exp3_last_probability.exponent = probability.exponent;
+			set_floating(flow_info->exp3_last_probability, probability);
 			break;
-		}*/
-	/*}
+		}
+	}
 
-	flow_info->exp3_last_number_actions = nbr_valid_paths;*/
+	flow_info->exp3_last_number_actions = nbr_valid_paths;
 	return chosen_id;
 }
 
