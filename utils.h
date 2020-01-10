@@ -24,13 +24,13 @@
 #define WAIT_BEFORE_INITIAL_MOVE 1000000000 // 1 sec
 #define WAIT_BACKOFF 2 // Multiply by two the waiting time whenever a path change is made
 
-// Float constant multiplier to make float operations work with integer
-#define FLOAT_MULT 1000000000
-
 // Exp3 GAMMA
 #define GAMMA(x) bpf_to_floating(0, 5, 1, &x, sizeof(floating)) // 0.5
 #define GAMMA_REV(x) bpf_to_floating(2, 0, 1, &x, sizeof(floating)) // 1/0.5 = 2
 #define ONE_MINUS_GAMMA(x) bpf_to_floating(0, 5, 1, &x, sizeof(floating)) // 1 - 0.5 = 0.5
+
+// Stats
+#define MAX_SNAPSHOTS 100 // The max number fo snapshot to keep
 
 /* eBPF definitions */
 #ifndef __section
@@ -87,7 +87,7 @@ struct ip6_srh_t {
 struct srh_record_t {
 	__u32 srh_id;
 	__u32 is_valid;
-	__u64 curr_bw; 
+	__u64 curr_bw; // Mbps
 	__u64 delay; // ms
 	struct ip6_srh_t srh;
 } __attribute__((packed));
@@ -116,58 +116,52 @@ struct flow_infos {
 	__u32 exp3_last_number_actions;
 	__u32 exp3_curr_reward;
 	floating exp3_last_probability;
-	__u64 exp3_weigth_mantissa_0; // Current weight for each path
-	__u32 exp3_weigth_exponent_0;
-	__u64 exp3_weigth_mantissa_1; // Current weight for each path
-	__u32 exp3_weigth_exponent_1;
-	__u64 exp3_weigth_mantissa_2; // Current weight for each path
-	__u32 exp3_weigth_exponent_2;
-	__u64 exp3_weigth_mantissa_3; // Current weight for each path
-	__u32 exp3_weigth_exponent_3;
+	floating exp3_weight_0; // Current weight for each path
+	floating exp3_weight_1; // Current weight for each path
+	floating exp3_weight_2; // Current weight for each path
+	floating exp3_weight_3; // Current weight for each path
 } __attribute__((packed));
 
-#define exp3_weigth_mantissa_set(flow_infos, idx, value) \
-	if (idx == 0) \
-		flow_infos->exp3_weigth_mantissa_0 = value; \
-	else if (idx == 1) \
-		flow_infos->exp3_weigth_mantissa_1 = value; \
-	else if (idx == 2) \
-		flow_infos->exp3_weigth_mantissa_2 = value; \
-	else \
-		flow_infos->exp3_weigth_mantissa_3 = value;
+struct flow_snapshot {
+	__u32 sequence; // 0 if never used -> we change the lowest sequence id
+	__u64 time;
+	struct flow_tuple flow_id;
+	struct flow_infos flow;
+} __attribute__((packed));
 
-#define exp3_weigth_exponent_set(flow_infos, idx, value) \
-	if (idx == 0) \
-		flow_infos->exp3_weigth_exponent_0 = value; \
-	else if (idx == 1) \
-		flow_infos->exp3_weigth_exponent_1 = value; \
-	else if (idx == 2) \
-		flow_infos->exp3_weigth_exponent_2 = value; \
-	else \
-		flow_infos->exp3_weigth_exponent_3 = value;
+#define exp3_weight_set(flow_infos, idx, value) \
+	if (idx == 0) {\
+		(flow_infos)->exp3_weight_0.mantissa = (value).mantissa; \
+		(flow_infos)->exp3_weight_0.exponent = (value).exponent; \
+	} else if (idx == 1) { \
+		(flow_infos)->exp3_weight_1.mantissa = (value).mantissa; \
+		(flow_infos)->exp3_weight_1.exponent = (value).exponent; \
+	} else if (idx == 2) { \
+		(flow_infos)->exp3_weight_2.mantissa = (value).mantissa; \
+		(flow_infos)->exp3_weight_2.exponent = (value).exponent; \
+	} else { \
+		(flow_infos)->exp3_weight_3.mantissa = (value).mantissa; \
+		(flow_infos)->exp3_weight_3.exponent = (value).exponent; \
+	}
 
-#define exp3_weigth_mantissa_get(flow_infos, idx, value) \
-	if (idx == 0) \
-		value = flow_infos->exp3_weigth_mantissa_0; \
-	else if (idx == 1) \
-		value = flow_infos->exp3_weigth_mantissa_1; \
-	else if (idx == 2) \
-		value = flow_infos->exp3_weigth_mantissa_2; \
-	else \
-		value = flow_infos->exp3_weigth_mantissa_3;
-
-#define exp3_weigth_exponent_get(flow_infos, idx, value) \
-	if (idx == 0) \
-		value = flow_infos->exp3_weigth_exponent_0; \
-	else if (idx == 1) \
-		value = flow_infos->exp3_weigth_exponent_1; \
-	else if (idx == 2) \
-		value = flow_infos->exp3_weigth_exponent_2; \
-	else \
-		value = flow_infos->exp3_weigth_exponent_3;
+#define exp3_weight_get(flow_infos, idx, value) \
+	if (idx == 0) { \
+		(value).mantissa = (flow_infos)->exp3_weight_0.mantissa; \
+		(value).exponent = (flow_infos)->exp3_weight_0.exponent; \
+	} else if (idx == 1) { \
+		(value).mantissa = (flow_infos)->exp3_weight_1.mantissa; \
+		(value).exponent = (flow_infos)->exp3_weight_1.exponent; \
+	} else if (idx == 2) { \
+		(value).mantissa = (flow_infos)->exp3_weight_2.mantissa; \
+		(value).exponent = (flow_infos)->exp3_weight_2.exponent; \
+	} else { \
+		(value).mantissa = (flow_infos)->exp3_weight_3.mantissa; \
+		(value).exponent = (flow_infos)->exp3_weight_3.exponent; \
+	}
 
 struct dst_infos {
 	struct ip6_addr_t dest;
+	__u32 max_reward;
 	struct srh_record_t srhs[MAX_SRH_BY_DEST];
 } __attribute__((packed));
 
@@ -196,7 +190,56 @@ static void get_flow_id_from_sock(struct flow_tuple *flow_id, struct bpf_sock_op
 	flow_id->remote_port = bpf_ntohl(skops->remote_port);
 }
 
-static __always_inline void exp3_reward_path(struct flow_infos *flow_info)
+struct snapshot_arg {
+	struct flow_snapshot *new_snapshot;
+	__u64 oldest_seq;
+	__u32 best_idx;
+	__u32 max_seq;
+	__u32 setup;
+};
+
+static void take_snapshot(struct bpf_elf_map *st_map, struct flow_infos *flow_info, struct flow_tuple *flow_id)
+{
+	struct flow_snapshot *curr_snapshot = NULL;
+	struct snapshot_arg arg = {
+		.new_snapshot = NULL,
+		.oldest_seq = 0,
+		.best_idx = 0,
+		.max_seq = 0
+	};
+
+	curr_snapshot = (void *) bpf_map_lookup_elem(st_map, &arg.best_idx);
+	if (curr_snapshot) {
+		arg.new_snapshot = curr_snapshot;
+		arg.oldest_seq = curr_snapshot->sequence;
+		arg.max_seq = curr_snapshot->sequence;
+	}
+
+	//#pragma clang loop unroll(full)
+	for (int i = 0; i <= MAX_SNAPSHOTS - 1; i++) {
+		int xxx = i;
+		curr_snapshot = (void *) bpf_map_lookup_elem(st_map, &xxx);
+		if (curr_snapshot) {
+			if (arg.max_seq < curr_snapshot->sequence) {
+				arg.max_seq = curr_snapshot->sequence;
+			}
+			if (arg.oldest_seq > curr_snapshot->sequence) {
+				arg.oldest_seq = curr_snapshot->sequence;
+				arg.new_snapshot = curr_snapshot;
+				arg.best_idx = xxx;
+			}
+		}
+	}
+	if (arg.new_snapshot) {
+		memcpy(&arg.new_snapshot->flow, flow_info, sizeof(struct flow_infos));
+		memcpy(&arg.new_snapshot->flow_id, flow_id, sizeof(struct flow_tuple));
+		arg.new_snapshot->sequence = arg.max_seq + 1;
+		arg.new_snapshot->time = bpf_ktime_get_ns();
+		bpf_map_update_elem(st_map, &arg.best_idx, arg.new_snapshot, BPF_ANY);
+	}
+}
+
+static __always_inline void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst_infos)
 {
 	/*
 	theReward = reward(choice, t)
@@ -204,6 +247,7 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info)
 	*/
 	floating gamma_rev;
 	floating reward;
+	floating scaled_reward; // should be in [0, 1]
 	floating exponent_den_factor;
 	floating exponent_den;
 	floating nbr_actions;
@@ -212,9 +256,13 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info)
 	floating float_tmp, float_tmp2;
 	floating operands[2];
 
+	floating max_reward;
+	bpf_to_floating(dst_infos->max_reward + 1, 0, 1, &max_reward, sizeof(floating));
+
 	GAMMA_REV(gamma_rev);
 
-	bpf_to_floating(flow_info->exp3_curr_reward, 0, 1, &reward, sizeof(floating)); // TODO Compute reward
+	// TODO Compute new reward !!!!
+	bpf_to_floating(flow_info->exp3_curr_reward, 0, 1, &reward, sizeof(floating));
 	bpf_to_floating(flow_info->exp3_last_number_actions, 1, 0, &nbr_actions, sizeof(floating));
 
 	set_floating(operands[0], flow_info->exp3_last_probability);
@@ -226,30 +274,34 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info)
 	bpf_floating_multiply(operands, sizeof(floating) * 2, &exponent_den, sizeof(floating));
 
 	set_floating(operands[0], reward);
+	set_floating(operands[1], max_reward);
+	bpf_floating_divide(operands, sizeof(floating) * 2, &scaled_reward, sizeof(floating));
+
+	set_floating(operands[0], scaled_reward);
 	set_floating(operands[1], exponent_den);
 	bpf_floating_divide(operands, sizeof(floating) * 2, &exponent, sizeof(floating));
 
 	bpf_floating_e_power_a(&exponent, sizeof(floating), &weight_factor, sizeof(floating));
+	//bpf_debug("OK AFTER EXP %d\n", (weight_factor.mantissa & LARGEST_BIT) != 0);
 	// TODO Remove
-	//flow_info->exp3_weigth_mantissa_1 = weight_factor.mantissa;
-	//flow_info->exp3_weigth_exponent_1 = weight_factor.exponent;
+	//flow_info->exp3_weight_mantissa_1 = weight_factor.mantissa;
+	//flow_info->exp3_weight_exponent_1 = weight_factor.exponent;
 	//weight_factor.mantissa = exponent.mantissa;
 	//weight_factor.exponent = exponent.exponent;
 	// TODO Remove
 
 	__u32 idx = flow_info->srh_id;
 	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) { // Always true but this is for eBPF loader
-		exp3_weigth_mantissa_get(flow_info, idx, float_tmp.mantissa);
-		exp3_weigth_exponent_get(flow_info, idx, float_tmp.exponent);
+		exp3_weight_get(flow_info, idx, float_tmp);
+		//bpf_debug("OK END 1 %d\n", (float_tmp.mantissa & LARGEST_BIT) != 0);
 		set_floating(operands[0], float_tmp);
 		set_floating(operands[1], weight_factor);
 		bpf_floating_multiply(operands, sizeof(floating) * 2, &float_tmp2, sizeof(floating));
-		exp3_weigth_mantissa_set(flow_info, idx, float_tmp2.mantissa);
-		exp3_weigth_exponent_set(flow_info, idx, float_tmp2.exponent);
+		exp3_weight_set(flow_info, idx, float_tmp2);
 	}
 }
 
-static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, __u32 *dst_addr)
+static __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, __u32 *dst_addr, int reward_compute)
 {
 	/*
 	def distr(weights, gamma=0.0):
@@ -275,7 +327,7 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 	floating gamma;
 	GAMMA(gamma);
 
-	__u32 chosen_id = 1, current_delay = 0;
+	__u32 chosen_id = 0, current_delay = 0;
 	struct srh_record_t *srh_record = NULL;
 	struct dst_infos *dst_infos = NULL;
 
@@ -286,7 +338,9 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 	}
 
 	// Compute the reward of the previous path
-	exp3_reward_path(flow_info);
+	if (reward_compute) {
+		exp3_reward_path(flow_info, dst_infos);
+	}
 
 	// Compute the sum of weights
 	floating sum;
@@ -310,18 +364,18 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 			continue; // Not a valid SRH for the destination
 		}
 
+		/* XXX Check with Schapira
 		if (!flow_info || srh_record->srh_id == flow_info->srh_id) {  // 1
 			continue;
-		}
+		}*/
 
 		set_floating(operands[0], sum);
-		exp3_weigth_mantissa_get(flow_info, xxx, operands[1].mantissa);
-		exp3_weigth_exponent_get(flow_info, xxx, operands[1].exponent);
+		exp3_weight_get(flow_info, xxx, operands[1]);
 		bpf_floating_add(operands, sizeof(floating) * 2, &sum, sizeof(floating));
 		nbr_valid_paths += 1;
 	}
 
-	// TODO Compute the probabilities
+	// Compute the probabilities
 	floating probability;
 	floating one_minus_gamma;
 	ONE_MINUS_GAMMA(one_minus_gamma);
@@ -338,6 +392,8 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 	__u64 pick = ((__u64) bpf_get_prandom_u32()) % FLOAT_MULT; // No problem if FLOAT_MULT < UIN32T_MAX
 	__u64 accumulator = 0;
 	__u32 decimal[2];
+	decimal[0] = 0;
+	decimal[1] = 0;
 
 	#pragma clang loop unroll(full)
 	for (__u32 i = 0; i <= MAX_SRH_BY_DEST - 1; i++) {
@@ -357,14 +413,15 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 			continue; // Not a valid SRH for the destination
 		}
 
+		/* XXX Check with Schapira
 		if (!flow_info || srh_record->srh_id == flow_info->srh_id) {  // 2
 			continue;
 		}
+		*/
 
 		// prob[i] = (1.0 - gamma) * (w[i] / theSum) + (gamma / len(weights))
 		set_floating(operands[0], one_minus_gamma);
-		exp3_weigth_mantissa_get(flow_info, yyy, operands[1].mantissa);
-		exp3_weigth_exponent_get(flow_info, yyy, operands[1].exponent);
+		exp3_weight_get(flow_info, yyy, operands[1]);
 		bpf_floating_multiply(operands, sizeof(floating) * 2, &weight_times_gama, sizeof(floating));
 
 		set_floating(operands[0], weight_times_gama);
@@ -381,9 +438,16 @@ static __always_inline __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct f
 			// We found the chosen one
 			chosen_id = i;
 			set_floating(flow_info->exp3_last_probability, probability);
+			//bpf_debug("prob mantissa %llu - exp %u\n", probability.mantissa, probability.exponent);
+			bpf_debug("%u - %u\n", pick, decimal[1]);
 			break;
 		}
 	}
+
+	//exp3_weight_get(flow_info, 0, operands[0]); // TODO Remove
+	//exp3_weight_get(flow_info, 1, operands[1]); // TODO Remove
+	//bpf_debug("%llu - %u\n", operands[0].mantissa, operands[0].exponent); // TODO Remove
+	//bpf_debug("%llu - %u\n", operands[1].mantissa, operands[1].exponent); // TODO Remove
 
 	flow_info->exp3_last_number_actions = nbr_valid_paths;
 	return chosen_id;
@@ -403,6 +467,14 @@ struct bpf_elf_map SEC("maps") dest_map = {
 	.size_value	= sizeof(struct dst_infos),
 	.pinning	= PIN_NONE,
 	.max_elem	= MAX_FLOWS,
+};
+
+struct bpf_elf_map SEC("maps") stat_map = {
+	.type		= BPF_MAP_TYPE_ARRAY,
+	.size_key	= sizeof(__u32),
+	.size_value	= sizeof(struct flow_snapshot),
+	.pinning	= PIN_NONE,
+	.max_elem	= MAX_SNAPSHOTS,
 };
 
 #endif

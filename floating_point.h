@@ -11,4 +11,7 @@
 #define set_floating(dest, src) dest.mantissa = src.mantissa; \
 								dest.exponent = src.exponent;
 
+// Float max decimal precision when transforming to u32s
+#define FLOAT_MULT 1000000000UL
+
 #endif

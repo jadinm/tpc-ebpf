@@ -17,7 +17,7 @@
 #define ntohll(x) ((bpf_ntohl(1)) == 1 ? (x) : ((uint64_t)bpf_ntohl((x) & \
 				0xFFFFFFFF) << 32) | bpf_ntohl((x) >> 32))
 
-static __always_inline int move_path(struct dst_infos *dst_infos, __u32 key, struct bpf_sock_ops *skops)
+static int move_path(struct dst_infos *dst_infos, __u32 key, struct bpf_sock_ops *skops)
 {
 	int rv = 1;
 	struct ip6_srh_t *srh = NULL;
@@ -54,19 +54,50 @@ static __always_inline void update_flow_timers(struct flow_infos *flow_info, str
 	flow_info->wait_before_move = ecn_time;
 }
 
+static int create_new_flow_infos(struct bpf_elf_map *dt_map, struct bpf_elf_map *c_map, struct flow_tuple *flow_id, __u64 cur_time, struct bpf_sock_ops *skops) {
+	struct flow_infos *flow_info;
+	struct flow_infos new_flow;
+	int rv = 0;
+	memset(&new_flow, 0, sizeof(struct flow_infos));
+
+	//bpf_debug("flow not found, adding it\n");
+	new_flow.sample_start_time = cur_time;
+	new_flow.sample_start_bytes = skops->snd_una;
+	new_flow.last_move_time = cur_time;
+	new_flow.exp3_last_number_actions = 1;
+	// Timers
+	new_flow.wait_backoff_max = WAIT_BEFORE_INITIAL_MOVE;
+	struct dst_infos *dst_infos = (void *) bpf_map_lookup_elem(dt_map, flow_id->remote_addr);
+	if (!dst_infos)
+		return 1; // Listening connections
+
+	// Inititialize to 1 EXP3 weight and probabilities
+	new_flow.exp3_last_probability.mantissa = LARGEST_BIT;
+	new_flow.exp3_last_probability.exponent = BIAS;
+	floating tmp;
+	bpf_to_floating(dst_infos->srhs[0].curr_bw, 0, 1, &tmp, sizeof(floating));
+	exp3_weight_set(&new_flow, 0, tmp);
+	bpf_to_floating(dst_infos->srhs[1].curr_bw, 0, 1, &tmp, sizeof(floating));
+	exp3_weight_set(&new_flow, 1, tmp);
+	bpf_to_floating(dst_infos->srhs[2].curr_bw, 0, 1, &tmp, sizeof(floating));
+	exp3_weight_set(&new_flow, 2, tmp);
+	bpf_to_floating(dst_infos->srhs[3].curr_bw, 0, 1, &tmp, sizeof(floating));
+	exp3_weight_set(&new_flow, 3, tmp);
+
+	// Insert flow to map
+	return bpf_map_update_elem(c_map, flow_id, &new_flow, BPF_ANY);
+}
+
 SEC("sockops")
 int handle_sockop(struct bpf_sock_ops *skops)
 {
-	struct srh_record_t *srh_record;
 	struct dst_infos *dst_infos;
 	struct flow_infos *flow_info;
 	struct flow_tuple flow_id;
 
 	int op;
 	int rv = 0;
-	__u32 key = 0;
 	__u64 cur_time;
-	__u32 ecount;
 
 	cur_time = bpf_ktime_get_ns();
 	op = (int) skops->op;
@@ -78,52 +109,34 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	}
 	get_flow_id_from_sock(&flow_id, skops);
 	flow_info = (void *)bpf_map_lookup_elem(&conn_map, &flow_id);
-
 	if (!flow_info) {  // TODO Problem if listening connections => no destination defined !!!
-		struct flow_infos new_flow;
-
-		//bpf_debug("flow not found, adding it\n");
-		new_flow.srh_id = 0; // TODO Call EXP3
-		new_flow.last_reported_bw = 0;
-		new_flow.sample_start_time = cur_time;
-		new_flow.sample_start_bytes = skops->snd_una;
-		new_flow.last_move_time = cur_time;
-		new_flow.first_loss_time = 0;
-		new_flow.number_of_loss = 0;
-		new_flow.ecn_count = 0;
-		new_flow.rtt_count = 0;
-		new_flow.last_ecn_rtt = 0;
-		new_flow.exp3_last_number_actions = 0;
-		new_flow.exp3_curr_reward = 0;
-		// Inititialize to 1 EXP3 weight and probabilities
-		new_flow.exp3_last_probability.mantissa = LARGEST_BIT;
-		new_flow.exp3_last_probability.exponent = 0;
-		new_flow.exp3_weigth_mantissa_0 = LARGEST_BIT;
-		new_flow.exp3_weigth_exponent_0 = 0;
-		new_flow.exp3_weigth_mantissa_1 = LARGEST_BIT;
-		new_flow.exp3_weigth_exponent_1 = 0;
-		new_flow.exp3_weigth_mantissa_2 = LARGEST_BIT;
-		new_flow.exp3_weigth_exponent_2 = 0;
-		new_flow.exp3_weigth_mantissa_3 = LARGEST_BIT;
-		new_flow.exp3_weigth_exponent_3 = 0;
-		// Timers
-		new_flow.wait_backoff_max = WAIT_BEFORE_INITIAL_MOVE;
-		dst_infos = (void *) bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
-		if (!dst_infos)
-			return 1; // Listening connections
-
-		move_path(dst_infos, new_flow.srh_id, skops);
-		update_flow_timers(&new_flow, dst_infos);
-
-		// Insert flow to map
-		rv = bpf_map_update_elem(&conn_map, &flow_id, &new_flow, BPF_ANY);
-		if (rv) 
+		if (create_new_flow_infos(&dest_map, &conn_map, &flow_id, cur_time, skops)) {
 			return 1;
-		flow_info = (void *)bpf_map_lookup_elem(&conn_map, &flow_id);
-		if (!flow_info)
-			return 1;
-		//bpf_debug("Flow path is correctly entered !\n");
-		//bpf_debug("Select path ID : %lu - src %u.%u\n", new_flow.srh_id, flow_id.local_addr[0], flow_id.local_addr[1]);
+		}
+		flow_info = (void *) bpf_map_lookup_elem(&conn_map, &flow_id);
+		if (flow_info) {
+			dst_infos = (void *) bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
+			if (dst_infos) {
+				// Call EXP3
+				flow_info->srh_id = exp3_next_path(&dest_map, flow_info, flow_id.remote_addr, 0);
+				move_path(dst_infos, flow_info->srh_id, skops);
+				update_flow_timers(flow_info, dst_infos);
+
+				if (flow_info->srh_id >= 0 && flow_info->srh_id <= MAX_SRH_BY_DEST - 1)
+					flow_info->exp3_curr_reward = dst_infos->srhs[flow_info->srh_id].curr_bw;
+
+				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				if (rv)
+					return 1;
+
+				take_snapshot(&stat_map, flow_info, &flow_id);
+
+				bpf_sock_ops_cb_flags_set(skops, (BPF_SOCK_OPS_RETRANS_CB_FLAG|BPF_SOCK_OPS_RTO_CB_FLAG|BPF_SOCK_OPS_RTT_CB_FLAG));
+				skops->reply = rv;
+				return 0;
+			}
+		}
+		return 1;
 	}
 
 	//bpf_debug("segs_out: %lu packets: %lu interval: %lu\n", skops->segs_out, skops->rate_delivered, skops->rate_interval_us);
@@ -140,6 +153,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 					bpf_map_update_elem(&dest_map, flow_id.remote_addr, dst_infos, BPF_ANY);
 				}*/
 				// Delete the flow from the flows map
+				take_snapshot(&stat_map, flow_info, &flow_id);
 				bpf_map_delete_elem(&conn_map, &flow_id);
 			}
 			break;
@@ -183,7 +197,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			break;*/
 		case BPF_SOCK_OPS_TCP_CONNECT_CB:
 			//bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_STATE_CB_FLAG); // TCP State change
-			bpf_sock_ops_cb_flags_set(skops, (BPF_SOCK_OPS_RETRANS_CB_FLAG|BPF_SOCK_OPS_RTO_CB_FLAG|BPF_SOCK_OPS_RTT_CB_FLAG));
+			//bpf_sock_ops_cb_flags_set(skops, (BPF_SOCK_OPS_RETRANS_CB_FLAG|BPF_SOCK_OPS_RTO_CB_FLAG|BPF_SOCK_OPS_RTT_CB_FLAG));
 			/*dst_infos = (void *)bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 			if (dst_infos && flow_info->srh_id >= 0 && flow_info->srh_id < MAX_SRH_BY_DEST) {
 				srh_record = &dst_infos->srhs[flow_info->srh_id];
@@ -211,7 +225,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			}
 			flow_info->last_ecn_rtt = flow_info->rtt_count;
 
-			ecount = flow_info->ecn_count;
+			__u32 ecount = flow_info->ecn_count;
 			flow_info->ecn_count = ecount + 1;
 
 			// We already moved less than X seconds ago... do nothing
@@ -224,7 +238,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			flow_info->ecn_count = 0;
 
 			//bpf_debug("Congestion experienced - Try to change from %u\n", flow_info->srh_id);
-			key = exp3_next_path(&dest_map, flow_info, flow_id.remote_addr);
+			__u32 key = exp3_next_path(&dest_map, flow_info, flow_id.remote_addr, 1);
+			take_snapshot(&stat_map, flow_info, &flow_id); // Even if it doesn't change, we want to know
 
 			// This can't be helped
 			if (key == flow_info->srh_id)
