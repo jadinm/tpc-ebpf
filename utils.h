@@ -10,9 +10,11 @@
 #define AF_INET6 		10 /* IPv6 HDR */
 #define SOL_IPV6 		41 /* IPv6 Sockopt */
 #define SOL_SOCKET		1 /* Socket Sockopt */
+#define SOL_TCP			6 /* TCP Sockopt */
 #define SO_MAX_PACING_RATE	47 /* Max pacing rate for setsockopt */
 #define IPV6_RTHDR 		57 /* SRv6 Option for sockopt */
 #define ETH_HLEN 		14 /* Ethernet hdr length */
+#define TCP_MAXSEG		2 /* Limit/Retrieve MSS */
 // #define DEBUG 			1
 #define PIN_NONE		0
 #define PIN_GLOBAL_NS	2
@@ -45,7 +47,7 @@
 
 #define SEC(NAME) __attribute__((section(NAME), used))
 
-#define DEBUG
+// TODO #define DEBUG
 #ifdef  DEBUG
 /* Only use this for debug output. Notice output from bpf_trace_printk()
  *  * end-up in /sys/kernel/debug/tracing/trace_pipe
@@ -102,6 +104,7 @@ struct flow_tuple {
 
 struct flow_infos {
 	__u32 srh_id;
+	__u32 mss;
 	__u32 last_reported_bw;
 	__u64 sample_start_time;
 	__u32 sample_start_bytes;
@@ -239,7 +242,7 @@ static void take_snapshot(struct bpf_elf_map *st_map, struct flow_infos *flow_in
 	}
 }
 
-static __always_inline void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst_infos)
+static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst_infos)
 {
 	/*
 	theReward = reward(choice, t)
@@ -247,7 +250,6 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info, struc
 	*/
 	floating gamma_rev;
 	floating reward;
-	floating scaled_reward; // should be in [0, 1]
 	floating exponent_den_factor;
 	floating exponent_den;
 	floating nbr_actions;
@@ -256,15 +258,29 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info, struc
 	floating float_tmp, float_tmp2;
 	floating operands[2];
 
+	floating mss;
 	floating max_reward;
-	bpf_to_floating(dst_infos->max_reward + 1, 0, 1, &max_reward, sizeof(floating));
+
+	// Compute max reward
+	bpf_to_floating((((__u64) dst_infos->max_reward + 1) * 1000 * 1000) / 8, 0, 1, &max_reward, sizeof(floating));
+	//bpf_debug("max_reward = %llu", (((__u64) dst_infos->max_reward + 1) * 1000 * 1000) / 8);
+	bpf_to_floating(flow_info->mss, 0, 1, &mss, sizeof(floating));
+	set_floating(operands[0], max_reward);
+	set_floating(operands[1], mss);
+	// Divide by MSS because max_reward_bw is given in terms of Bps
+	bpf_floating_divide(operands, sizeof(floating) * 2, &max_reward, sizeof(floating));
 
 	GAMMA_REV(gamma_rev);
 
-	// TODO Compute new reward !!!!
+	// Compute new reward
 	bpf_to_floating(flow_info->exp3_curr_reward, 0, 1, &reward, sizeof(floating));
 	bpf_to_floating(flow_info->exp3_last_number_actions, 1, 0, &nbr_actions, sizeof(floating));
 
+	set_floating(operands[0], reward);
+	set_floating(operands[1], max_reward);
+	bpf_floating_divide(operands, sizeof(floating) * 2, &reward, sizeof(floating)); // reward should be in [0, 1]
+
+	// Compute new weight
 	set_floating(operands[0], flow_info->exp3_last_probability);
 	set_floating(operands[1], gamma_rev);
 	bpf_floating_multiply(operands, sizeof(floating) * 2, &exponent_den_factor, sizeof(floating));
@@ -274,10 +290,6 @@ static __always_inline void exp3_reward_path(struct flow_infos *flow_info, struc
 	bpf_floating_multiply(operands, sizeof(floating) * 2, &exponent_den, sizeof(floating));
 
 	set_floating(operands[0], reward);
-	set_floating(operands[1], max_reward);
-	bpf_floating_divide(operands, sizeof(floating) * 2, &scaled_reward, sizeof(floating));
-
-	set_floating(operands[0], scaled_reward);
 	set_floating(operands[1], exponent_den);
 	bpf_floating_divide(operands, sizeof(floating) * 2, &exponent, sizeof(floating));
 

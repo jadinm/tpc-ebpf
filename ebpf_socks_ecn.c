@@ -65,6 +65,7 @@ static int create_new_flow_infos(struct bpf_elf_map *dt_map, struct bpf_elf_map 
 	new_flow.sample_start_bytes = skops->snd_una;
 	new_flow.last_move_time = cur_time;
 	new_flow.exp3_last_number_actions = 1;
+	new_flow.mss = 1024;
 	// Timers
 	new_flow.wait_backoff_max = WAIT_BEFORE_INITIAL_MOVE;
 	struct dst_infos *dst_infos = (void *) bpf_map_lookup_elem(dt_map, flow_id->remote_addr);
@@ -209,6 +210,13 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		case BPF_SOCK_OPS_RTT_CB:
 			// This RTT count is useful to determine the congestion level
 			flow_info->rtt_count += 1;
+			// Retrieve MSS
+			/*__u32 mss = 0;
+			if (bpf_getsockopt(skops, SOL_TCP, TCP_MAXSEG, &mss, sizeof(__u32))) {
+				bpf_debug("Cannot retrieve MSS\n");
+				return 1;
+			}*/
+			flow_info->mss = 1024; // XXX Retrieval not working
 			rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 			if (rv)
 				return 1;
@@ -217,7 +225,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			//bpf_debug("ECN received\n");
 			break;*/
 		case BPF_SOCK_OPS_ECN_CE:
-			//bpf_debug("Congestion experienced %lu %lu\n", flow_info->rtt_count, flow_info->last_ecn_rtt);
+			bpf_debug("Congestion experienced %lu %lu\n", flow_info->rtt_count, flow_info->last_ecn_rtt);
 			if (flow_info->rtt_count > flow_info->last_ecn_rtt + 100) {
 				flow_info->ecn_count = 0;
 			} else {
