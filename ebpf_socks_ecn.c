@@ -28,11 +28,11 @@ static int move_path(struct dst_infos *dst_infos, __u32 key, struct bpf_sock_ops
 		srh = &(dst_infos->srhs[key].srh);
 		bw = dst_infos->srhs[key].curr_bw * (1000 / 8) * 1000 * 9 / 10; // max 0.9 the bw
 		rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR, srh, sizeof(*srh));
-		if (!rv) {
+		/*if (!rv) {
 			rv = bpf_setsockopt(skops, SOL_SOCKET,
 					    SO_MAX_PACING_RATE, &bw, sizeof(int));
 			//bpf_debug("Try to set max pacing rate to %u returned %d\n", bw, rv);
-		}
+		}*/
 	}
 	return !!rv;
 }
