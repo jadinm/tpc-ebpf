@@ -20,16 +20,28 @@
 #define PIN_GLOBAL_NS	2
 #define MAX_SRH			50
 #define MAX_FLOWS		1024
-#define MAX_SRH_BY_DEST 4
-#define MAX_SEGS_NBR	4
+#define MAX_SRH_BY_DEST 10
+#define MAX_SEGS_NBR	10
 
 #define WAIT_BEFORE_INITIAL_MOVE 1000000000 // 1 sec
 #define WAIT_BACKOFF 2 // Multiply by two the waiting time whenever a path change is made
 
 // Exp3 GAMMA
+/* // GAMMA 0.1
+#define GAMMA(x) bpf_to_floating(0, 1, 1, &x, sizeof(floating)) // 0.1
+#define GAMMA_REV(x) bpf_to_floating(10, 0, 1, &x, sizeof(floating)) // 1/0.1 = 10
+#define ONE_MINUS_GAMMA(x) bpf_to_floating(0, 9, 1, &x, sizeof(floating)) // 1 - 0.1 = 0.9
+*/
+// GAMMA 0.5
 #define GAMMA(x) bpf_to_floating(0, 5, 1, &x, sizeof(floating)) // 0.5
 #define GAMMA_REV(x) bpf_to_floating(2, 0, 1, &x, sizeof(floating)) // 1/0.5 = 2
 #define ONE_MINUS_GAMMA(x) bpf_to_floating(0, 5, 1, &x, sizeof(floating)) // 1 - 0.5 = 0.5
+
+// GAMMA 0.9
+/*#define GAMMA(x) bpf_to_floating(0, 9, 1, &x, sizeof(floating)) // 0.1
+#define GAMMA_REV(x) bpf_to_floating(1, 111111, 6, &x, sizeof(floating)) // 1/0.9 = 1.11...
+#define ONE_MINUS_GAMMA(x) bpf_to_floating(0, 1, 1, &x, sizeof(floating)) // 1 - 0.9 = 0.1
+*/
 
 // Stats
 #define MAX_SNAPSHOTS 100 // The max number fo snapshot to keep
@@ -47,7 +59,7 @@
 
 #define SEC(NAME) __attribute__((section(NAME), used))
 
-// TODO #define DEBUG
+//#define DEBUG
 #ifdef  DEBUG
 /* Only use this for debug output. Notice output from bpf_trace_printk()
  *  * end-up in /sys/kernel/debug/tracing/trace_pipe
@@ -239,6 +251,7 @@ static void take_snapshot(struct bpf_elf_map *st_map, struct flow_infos *flow_in
 		arg.new_snapshot->sequence = arg.max_seq + 1;
 		arg.new_snapshot->time = bpf_ktime_get_ns();
 		bpf_map_update_elem(st_map, &arg.best_idx, arg.new_snapshot, BPF_ANY);
+		bpf_debug("Test %llu\n", arg.new_snapshot->time);
 	}
 }
 
