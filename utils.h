@@ -20,7 +20,7 @@
 #define PIN_GLOBAL_NS	2
 #define MAX_SRH			50
 #define MAX_FLOWS		1024
-#define MAX_SRH_BY_DEST 10
+#define MAX_SRH_BY_DEST 8
 #define MAX_SEGS_NBR	10
 
 #define WAIT_BEFORE_INITIAL_MOVE 1000000000 // 1 sec
@@ -116,25 +116,16 @@ struct flow_tuple {
 
 struct flow_infos {
 	__u32 srh_id;
-	__u32 mss;
-	__u32 last_reported_bw;
-	__u64 sample_start_time;
-	__u32 sample_start_bytes;
 	__u64 last_move_time;
 	__u64 wait_backoff_max; // current max wating time
 	__u64 wait_before_move; // current waiting time
-	__u64 first_loss_time;
-	__u32 number_of_loss;
 	__u64 rtt_count; // Count the number of RTT in the connection, this is useful to know if congestion signals are consecutive or not
 	__u32 ecn_count; // Count the number of consecutive CWR sent (either from ECN or other causes)
 	__u64 last_ecn_rtt; // The index of the last RTT were we sent an CWR
 	__u32 exp3_last_number_actions;
 	__u32 exp3_curr_reward;
 	floating exp3_last_probability;
-	floating exp3_weight_0; // Current weight for each path
-	floating exp3_weight_1; // Current weight for each path
-	floating exp3_weight_2; // Current weight for each path
-	floating exp3_weight_3; // Current weight for each path
+	floating exp3_weight[MAX_SRH_BY_DEST];
 } __attribute__((packed));
 
 struct flow_snapshot {
@@ -145,33 +136,15 @@ struct flow_snapshot {
 } __attribute__((packed));
 
 #define exp3_weight_set(flow_infos, idx, value) \
-	if (idx == 0) {\
-		(flow_infos)->exp3_weight_0.mantissa = (value).mantissa; \
-		(flow_infos)->exp3_weight_0.exponent = (value).exponent; \
-	} else if (idx == 1) { \
-		(flow_infos)->exp3_weight_1.mantissa = (value).mantissa; \
-		(flow_infos)->exp3_weight_1.exponent = (value).exponent; \
-	} else if (idx == 2) { \
-		(flow_infos)->exp3_weight_2.mantissa = (value).mantissa; \
-		(flow_infos)->exp3_weight_2.exponent = (value).exponent; \
-	} else { \
-		(flow_infos)->exp3_weight_3.mantissa = (value).mantissa; \
-		(flow_infos)->exp3_weight_3.exponent = (value).exponent; \
+	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) {\
+		(flow_infos)->exp3_weight[idx].mantissa = (value).mantissa; \
+		(flow_infos)->exp3_weight[idx].exponent = (value).exponent; \
 	}
 
 #define exp3_weight_get(flow_infos, idx, value) \
-	if (idx == 0) { \
-		(value).mantissa = (flow_infos)->exp3_weight_0.mantissa; \
-		(value).exponent = (flow_infos)->exp3_weight_0.exponent; \
-	} else if (idx == 1) { \
-		(value).mantissa = (flow_infos)->exp3_weight_1.mantissa; \
-		(value).exponent = (flow_infos)->exp3_weight_1.exponent; \
-	} else if (idx == 2) { \
-		(value).mantissa = (flow_infos)->exp3_weight_2.mantissa; \
-		(value).exponent = (flow_infos)->exp3_weight_2.exponent; \
-	} else { \
-		(value).mantissa = (flow_infos)->exp3_weight_3.mantissa; \
-		(value).exponent = (flow_infos)->exp3_weight_3.exponent; \
+	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) { \
+		(value).mantissa = (flow_infos)->exp3_weight[idx].mantissa; \
+		(value).exponent = (flow_infos)->exp3_weight[idx].exponent; \
 	}
 
 struct dst_infos {
@@ -251,7 +224,7 @@ static void take_snapshot(struct bpf_elf_map *st_map, struct flow_infos *flow_in
 		arg.new_snapshot->sequence = arg.max_seq + 1;
 		arg.new_snapshot->time = bpf_ktime_get_ns();
 		bpf_map_update_elem(st_map, &arg.best_idx, arg.new_snapshot, BPF_ANY);
-		bpf_debug("Test %llu\n", arg.new_snapshot->time);
+		//bpf_debug("Test %llu\n", arg.new_snapshot->time);
 	}
 }
 

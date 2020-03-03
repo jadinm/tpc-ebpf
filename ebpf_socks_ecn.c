@@ -76,14 +76,11 @@ static int create_new_flow_infos(struct bpf_elf_map *dt_map, struct bpf_elf_map 
 	new_flow.exp3_last_probability.mantissa = LARGEST_BIT;
 	new_flow.exp3_last_probability.exponent = BIAS;
 	floating tmp;
-	bpf_to_floating(dst_infos->srhs[0].curr_bw, 0, 1, &tmp, sizeof(floating));
-	exp3_weight_set(&new_flow, 0, tmp);
-	bpf_to_floating(dst_infos->srhs[1].curr_bw, 0, 1, &tmp, sizeof(floating));
-	exp3_weight_set(&new_flow, 1, tmp);
-	bpf_to_floating(dst_infos->srhs[2].curr_bw, 0, 1, &tmp, sizeof(floating));
-	exp3_weight_set(&new_flow, 2, tmp);
-	bpf_to_floating(dst_infos->srhs[3].curr_bw, 0, 1, &tmp, sizeof(floating));
-	exp3_weight_set(&new_flow, 3, tmp);
+	int i;
+	for (i = 0; i <= MAX_SRH_BY_DEST - 1; i++) {
+		bpf_to_floating(1, 0, 1, &tmp, sizeof(floating));
+		exp3_weight_set(&new_flow, i, tmp);
+	}
 
 	// Insert flow to map
 	return bpf_map_update_elem(c_map, flow_id, &new_flow, BPF_ANY);
@@ -210,13 +207,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		case BPF_SOCK_OPS_RTT_CB:
 			// This RTT count is useful to determine the congestion level
 			flow_info->rtt_count += 1;
-			// Retrieve MSS
-			/*__u32 mss = 0;
-			if (bpf_getsockopt(skops, SOL_TCP, TCP_MAXSEG, &mss, sizeof(__u32))) {
-				bpf_debug("Cannot retrieve MSS\n");
-				return 1;
-			}*/
-			flow_info->mss = 1024; // XXX Retrieval not working
 			rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 			if (rv)
 				return 1;
