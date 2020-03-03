@@ -27,7 +27,7 @@
 #define WAIT_BACKOFF 2 // Multiply by two the waiting time whenever a path change is made
 
 // Exp3 GAMMA
-/* // GAMMA 0.1
+/*// GAMMA 0.1
 #define GAMMA(x) bpf_to_floating(0, 1, 1, &x, sizeof(floating)) // 0.1
 #define GAMMA_REV(x) bpf_to_floating(10, 0, 1, &x, sizeof(floating)) // 1/0.1 = 10
 #define ONE_MINUS_GAMMA(x) bpf_to_floating(0, 9, 1, &x, sizeof(floating)) // 1 - 0.1 = 0.9
@@ -124,6 +124,7 @@ struct flow_infos {
 	__u64 last_ecn_rtt; // The index of the last RTT were we sent an CWR
 	__u32 exp3_last_number_actions;
 	__u32 exp3_curr_reward;
+	__u32 exp3_start_snd_nxt; // The reward is computed with the number of bytes exchanged during an amount of time
 	floating exp3_last_probability;
 	floating exp3_weight[MAX_SRH_BY_DEST];
 } __attribute__((packed));
@@ -244,17 +245,13 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 	floating float_tmp, float_tmp2;
 	floating operands[2];
 
-	floating mss;
 	floating max_reward;
 
 	// Compute max reward
-	bpf_to_floating((((__u64) dst_infos->max_reward + 1) * 1000 * 1000) / 8, 0, 1, &max_reward, sizeof(floating));
+	bpf_debug("dst_infos->max_reward %u\n", dst_infos->max_reward);
+	bpf_debug("dst_infos->max_reward %u\n", (((__u64) dst_infos->max_reward)) / 8 + 1);
+	bpf_to_floating((((__u64) dst_infos->max_reward)) / 8 + 1, 0, 1, &max_reward, sizeof(floating));
 	//bpf_debug("max_reward = %llu", (((__u64) dst_infos->max_reward + 1) * 1000 * 1000) / 8);
-	bpf_to_floating(flow_info->mss, 0, 1, &mss, sizeof(floating));
-	set_floating(operands[0], max_reward);
-	set_floating(operands[1], mss);
-	// Divide by MSS because max_reward_bw is given in terms of Bps
-	bpf_floating_divide(operands, sizeof(floating) * 2, &max_reward, sizeof(floating));
 
 	GAMMA_REV(gamma_rev);
 
@@ -264,7 +261,11 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 
 	set_floating(operands[0], reward);
 	set_floating(operands[1], max_reward);
+	bpf_debug("reward int - %u\n", flow_info->exp3_curr_reward);
+	bpf_debug("reward %u - %llu\n", reward.exponent, reward.mantissa);
 	bpf_floating_divide(operands, sizeof(floating) * 2, &reward, sizeof(floating)); // reward should be in [0, 1]
+	bpf_debug("max_reward %u - %llu\n", max_reward.exponent, max_reward.mantissa);
+	bpf_debug("relative reward %u - %llu\n", reward.exponent, reward.mantissa);
 
 	// Compute new weight
 	set_floating(operands[0], flow_info->exp3_last_probability);
@@ -280,6 +281,7 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 	bpf_floating_divide(operands, sizeof(floating) * 2, &exponent, sizeof(floating));
 
 	bpf_floating_e_power_a(&exponent, sizeof(floating), &weight_factor, sizeof(floating));
+	bpf_debug("reward %u - %llu\n", weight_factor.exponent, weight_factor.mantissa);
 	//bpf_debug("OK AFTER EXP %d\n", (weight_factor.mantissa & LARGEST_BIT) != 0);
 	// TODO Remove
 	//flow_info->exp3_weight_mantissa_1 = weight_factor.mantissa;

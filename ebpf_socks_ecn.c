@@ -61,11 +61,8 @@ static int create_new_flow_infos(struct bpf_elf_map *dt_map, struct bpf_elf_map 
 	memset(&new_flow, 0, sizeof(struct flow_infos));
 
 	//bpf_debug("flow not found, adding it\n");
-	new_flow.sample_start_time = cur_time;
-	new_flow.sample_start_bytes = skops->snd_una;
-	new_flow.last_move_time = cur_time;
 	new_flow.exp3_last_number_actions = 1;
-	new_flow.mss = 1024;
+	new_flow.exp3_start_snd_nxt = skops->snd_nxt;
 	// Timers
 	new_flow.wait_backoff_max = WAIT_BEFORE_INITIAL_MOVE;
 	struct dst_infos *dst_infos = (void *) bpf_map_lookup_elem(dt_map, flow_id->remote_addr);
@@ -118,6 +115,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 				// Call EXP3
 				flow_info->srh_id = exp3_next_path(&dest_map, flow_info, flow_id.remote_addr, 0);
 				move_path(dst_infos, flow_info->srh_id, skops);
+				flow_info->exp3_start_snd_nxt = skops->snd_nxt;
 				update_flow_timers(flow_info, dst_infos);
 
 				if (flow_info->srh_id >= 0 && flow_info->srh_id <= MAX_SRH_BY_DEST - 1)
@@ -215,7 +213,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			//bpf_debug("ECN received\n");
 			break;*/
 		case BPF_SOCK_OPS_ECN_CE:
-			bpf_debug("Congestion experienced %lu %lu\n", flow_info->rtt_count, flow_info->last_ecn_rtt);
+			//bpf_debug("Congestion experienced %lu %lu\n", flow_info->rtt_count, flow_info->last_ecn_rtt);
 			if (flow_info->rtt_count > flow_info->last_ecn_rtt + 100) {
 				flow_info->ecn_count = 0;
 			} else {
@@ -235,7 +233,10 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			}
 			flow_info->ecn_count = 0;
 
-			//bpf_debug("Congestion experienced - Try to change from %u\n", flow_info->srh_id);
+			flow_info->exp3_curr_reward = (skops->snd_nxt - flow_info->exp3_start_snd_nxt) / 1000000; // MB
+			// It should be at least 1 otherwise, it raises issues
+			flow_info->exp3_curr_reward = (flow_info->exp3_curr_reward / ((__u32) ((cur_time - flow_info->last_move_time) / 1000000000L))) + 1; // MB/s
+			//bpf_debug("time diff %u in ms\n", ((__u32) ((cur_time - flow_info->last_move_time) / 1000000L)));
 			__u32 key = exp3_next_path(&dest_map, flow_info, flow_id.remote_addr, 1);
 			take_snapshot(&stat_map, flow_info, &flow_id); // Even if it doesn't change, we want to know
 
@@ -255,8 +256,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 					// Update flow informations
 					flow_info->srh_id = key;
 					flow_info->last_move_time = cur_time;
-					flow_info->first_loss_time = 0;
-					flow_info->number_of_loss = 0;
+					bpf_debug("%u - %u\n", (skops->snd_nxt - flow_info->exp3_start_snd_nxt) / 1000000, ((__u32) ((cur_time - flow_info->last_move_time) / 1000000000L)));
+					flow_info->exp3_start_snd_nxt = skops->snd_nxt;
 
 					update_flow_timers(flow_info, dst_infos);
 					bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
