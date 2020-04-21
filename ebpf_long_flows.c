@@ -4,18 +4,14 @@
  * License as published by the Free Software Foundation.
  */
 
-#define KBUILD_MODNAME "EBPF SOCKS HHF"
+#define KBUILD_MODNAME "EBPF LONG FLOWS"
 #include <asm/byteorder.h>
 #include <uapi/linux/bpf.h>
 #include "bpf_helpers.h"
 #include "bpf_endian.h"
 #include "kernel.h"
-#include "utils.h"
+#include "ebpf_long_flows.h"
 
-#define htonll(x) ((bpf_htonl(1)) == 1 ? (x) : ((uint64_t)bpf_htonl((x) & \
-				0xFFFFFFFF) << 32) | bpf_htonl((x) >> 32))
-#define ntohll(x) ((bpf_ntohl(1)) == 1 ? (x) : ((uint64_t)bpf_ntohl((x) & \
-				0xFFFFFFFF) << 32) | bpf_ntohl((x) >> 32))
 
 static int move_path(struct dst_infos *dst_infos, __u32 key, struct bpf_sock_ops *skops)
 {
