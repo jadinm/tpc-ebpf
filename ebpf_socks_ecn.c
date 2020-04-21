@@ -272,7 +272,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 					// Update flow informations
 					flow_info->srh_id = key;
 					flow_info->last_move_time = cur_time;
-					bpf_debug("%u - %u\n", (skops->snd_nxt - flow_info->exp3_start_snd_nxt) / 1000000, ((__u32) ((cur_time - flow_info->last_move_time) / 1000000000L)));
+					//bpf_debug("%u - %u\n", (skops->snd_nxt - flow_info->exp3_start_snd_nxt) / 1000000, ((__u32) ((cur_time - flow_info->last_move_time) / 1000000000L)));
 					flow_info->exp3_start_snd_nxt = skops->snd_nxt;
 
 					update_flow_timers(flow_info, dst_infos);

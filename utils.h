@@ -210,7 +210,6 @@ static void take_snapshot(struct bpf_elf_map *st_map, struct flow_infos *flow_in
 		arg.new_snapshot->sequence = arg.max_seq + 1;
 		arg.new_snapshot->time = bpf_ktime_get_ns();
 		bpf_map_update_elem(st_map, &arg.best_idx, arg.new_snapshot, BPF_ANY);
-		//bpf_debug("Test %llu\n", arg.new_snapshot->time);
 	}
 }
 
@@ -243,11 +242,7 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 
 	set_floating(operands[0], reward);
 	set_floating(operands[1], max_reward);
-	bpf_debug("reward int - %u\n", flow_info->exp3_curr_reward);
-	bpf_debug("reward %u - %llu\n", reward.exponent, reward.mantissa);
 	bpf_floating_divide(operands, sizeof(floating) * 2, &reward, sizeof(floating)); // reward should be in [0, 1]
-	bpf_debug("max_reward %u - %llu\n", max_reward.exponent, max_reward.mantissa);
-	bpf_debug("relative reward %u - %llu\n", reward.exponent, reward.mantissa);
 
 	// Compute new weight
 	set_floating(operands[0], flow_info->exp3_last_probability);
@@ -263,19 +258,10 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 	bpf_floating_divide(operands, sizeof(floating) * 2, &exponent, sizeof(floating));
 
 	bpf_floating_e_power_a(&exponent, sizeof(floating), &weight_factor, sizeof(floating));
-	bpf_debug("reward %u - %llu\n", weight_factor.exponent, weight_factor.mantissa);
-	//bpf_debug("OK AFTER EXP %d\n", (weight_factor.mantissa & LARGEST_BIT) != 0);
-	// TODO Remove
-	//flow_info->exp3_weight_mantissa_1 = weight_factor.mantissa;
-	//flow_info->exp3_weight_exponent_1 = weight_factor.exponent;
-	//weight_factor.mantissa = exponent.mantissa;
-	//weight_factor.exponent = exponent.exponent;
-	// TODO Remove
 
 	__u32 idx = flow_info->srh_id;
 	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) { // Always true but this is for eBPF loader
 		exp3_weight_get(flow_info, idx, float_tmp);
-		//bpf_debug("OK END 1 %d\n", (float_tmp.mantissa & LARGEST_BIT) != 0);
 		set_floating(operands[0], float_tmp);
 		set_floating(operands[1], weight_factor);
 		bpf_floating_multiply(operands, sizeof(floating) * 2, &float_tmp2, sizeof(floating));
@@ -346,11 +332,6 @@ static __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_
 			continue; // Not a valid SRH for the destination
 		}
 
-		/* XXX Check with Schapira
-		if (!flow_info || srh_record->srh_id == flow_info->srh_id) {  // 1
-			continue;
-		}*/
-
 		set_floating(operands[0], sum);
 		exp3_weight_get(flow_info, xxx, operands[1]);
 		bpf_floating_add(operands, sizeof(floating) * 2, &sum, sizeof(floating));
@@ -391,15 +372,8 @@ static __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_
 		}
 
 		if (!srh_record->is_valid) {  // 2
-			//bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
 			continue; // Not a valid SRH for the destination
 		}
-
-		/* XXX Check with Schapira
-		if (!flow_info || srh_record->srh_id == flow_info->srh_id) {  // 2
-			continue;
-		}
-		*/
 
 		// prob[i] = (1.0 - gamma) * (w[i] / theSum) + (gamma / len(weights))
 		set_floating(operands[0], one_minus_gamma);
@@ -420,16 +394,9 @@ static __u32 exp3_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_
 			// We found the chosen one
 			chosen_id = i;
 			set_floating(flow_info->exp3_last_probability, probability);
-			//bpf_debug("prob mantissa %llu - exp %u\n", probability.mantissa, probability.exponent);
-			bpf_debug("%u - %u\n", pick, decimal[1]);
 			break;
 		}
 	}
-
-	//exp3_weight_get(flow_info, 0, operands[0]); // TODO Remove
-	//exp3_weight_get(flow_info, 1, operands[1]); // TODO Remove
-	//bpf_debug("%llu - %u\n", operands[0].mantissa, operands[0].exponent); // TODO Remove
-	//bpf_debug("%llu - %u\n", operands[1].mantissa, operands[1].exponent); // TODO Remove
 
 	flow_info->exp3_last_number_actions = nbr_valid_paths;
 	return chosen_id;
