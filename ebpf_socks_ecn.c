@@ -58,7 +58,12 @@ static __always_inline void update_flow_timers(struct flow_infos *flow_info, str
 		ecn_time = flow_info->wait_backoff_max; // max
 	}
 
-	flow_info->wait_backoff_max = flow_info->wait_backoff_max * 2; // Exponentially increase the maximum backoff time
+	if (flow_info->unstable) {
+		flow_info->wait_backoff_max = flow_info->wait_backoff_max * 2; // Exponentially increase the maximum backoff time
+		flow_info->unstable = 0;
+	} else {
+		flow_info->wait_backoff_max = WAIT_BEFORE_INITIAL_MOVE;
+	}
 
 	//bpf_debug("RANDOM = %lu\n", ecn_time);
 	flow_info->wait_before_move = ecn_time;
@@ -236,6 +241,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 			// We already moved less than X seconds ago... do nothing
 			if (flow_info->ecn_count < 3 || (cur_time - flow_info->last_move_time) < flow_info->wait_before_move) {
+				flow_info->unstable = 1;
 				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 				if (rv)
 					return 1;

@@ -109,6 +109,7 @@ struct flow_infos {
 	__u32 exp3_last_number_actions;
 	__u32 exp3_curr_reward;
 	__u32 exp3_start_snd_nxt; // The reward is computed with the number of bytes exchanged during an amount of time
+	__u32 unstable; // Whether the path is stable or not
 	floating exp3_last_probability;
 	floating exp3_weight[MAX_SRH_BY_DEST];
 } __attribute__((packed));
