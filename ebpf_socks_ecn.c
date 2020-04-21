@@ -237,7 +237,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			// It should be at least 1 otherwise, it raises issues
 			flow_info->exp3_curr_reward = (flow_info->exp3_curr_reward / ((__u32) ((cur_time - flow_info->last_move_time) / 1000000000L))) + 1; // MB/s
 			//bpf_debug("time diff %u in ms\n", ((__u32) ((cur_time - flow_info->last_move_time) / 1000000L)));
-			__u32 key = exp3_next_path(&dest_map, flow_info, flow_id.remote_addr, 1);
+			__u32 key = exp3_next_path(&dest_map, flow_info, flow_id.remote_addr, USE_EXP3); // XXX Uniform EXP3 with 0 because it means that reward never computed
 			take_snapshot(&stat_map, flow_info, &flow_id); // Even if it doesn't change, we want to know
 
 			// This can't be helped
