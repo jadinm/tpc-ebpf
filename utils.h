@@ -16,6 +16,7 @@
 #define IPV6_RTHDR 		57 /* SRv6 Option for sockopt */
 #define ETH_HLEN 		14 /* Ethernet hdr length */
 #define TCP_MAXSEG		2 /* Limit/Retrieve MSS */
+#define TCP_CONGESTION  13 /* Change congestion control */
 // #define DEBUG 			1
 #define PIN_NONE		0
 #define PIN_GLOBAL_NS	2

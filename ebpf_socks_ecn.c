@@ -20,6 +20,7 @@
 static int move_path(struct dst_infos *dst_infos, __u32 key, struct bpf_sock_ops *skops)
 {
 	int rv = 1;
+	char cc[20];
 	struct ip6_srh_t *srh = NULL;
 	__u32 bw = 0;
 	// Check needed to avoid verifier complaining about unbounded access
@@ -33,6 +34,15 @@ static int move_path(struct dst_infos *dst_infos, __u32 key, struct bpf_sock_ops
 					    SO_MAX_PACING_RATE, &bw, sizeof(int));
 			//bpf_debug("Try to set max pacing rate to %u returned %d\n", bw, rv);
 		}*/
+	}
+
+	if (!rv) {
+		rv = bpf_getsockopt(skops, SOL_TCP, TCP_CONGESTION, cc, sizeof(cc));
+		bpf_debug("CC got ? %d\n", rv);
+		if (!rv) {
+			rv = bpf_setsockopt(skops, SOL_TCP, TCP_CONGESTION, cc, sizeof(cc));
+			bpf_debug("CC reset ? %d\n", rv);
+		}
 	}
 	return !!rv;
 }
