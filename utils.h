@@ -233,10 +233,7 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 	floating max_reward;
 
 	// Compute max reward
-	bpf_debug("dst_infos->max_reward %u\n", dst_infos->max_reward);
-	bpf_debug("dst_infos->max_reward %u\n", (((__u64) dst_infos->max_reward)) / 8 + 1);
-	bpf_to_floating((((__u64) dst_infos->max_reward)) / 8 + 1, 0, 1, &max_reward, sizeof(floating));
-	//bpf_debug("max_reward = %llu", (((__u64) dst_infos->max_reward + 1) * 1000 * 1000) / 8);
+	bpf_to_floating((((__u64) dst_infos->max_reward) / MAX_REWARD_FACTOR) / 8 + 1, 0, 1, &max_reward, sizeof(floating));
 
 	GAMMA_REV(gamma_rev);
 
