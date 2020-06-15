@@ -113,13 +113,13 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 	floating max_reward;
 
 	// Compute max reward (in ms)
-	bpf_to_floating((((__u64) 50) / MAX_REWARD_FACTOR) + 1, 0, 1, &max_reward, sizeof(floating));
+	bpf_to_floating((((__u64) 100) / MAX_REWARD_FACTOR) + 1, 0, 1, &max_reward, sizeof(floating));
 
 	GAMMA_REV(gamma_rev);
 
 	// Compute new reward (in ms)
-	if ((skops->srtt_us >> 3) / 1000 < 50)
-		flow_info->exp3_curr_reward = 50 - (skops->srtt_us >> 3) / 1000; // TODO Reward longest paths TODO Change that !
+	if ((skops->srtt_us >> 3) / 1000 < 100)
+		flow_info->exp3_curr_reward = 100 - (skops->srtt_us >> 3) / 1000; // TODO Reward longest paths TODO Change that !
 	else
 		flow_info->exp3_curr_reward = 1; // TODO Reward longest paths TODO Change that !
 

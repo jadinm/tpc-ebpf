@@ -28,7 +28,7 @@
 #define WAIT_BACKOFF 2 // Multiply by two the waiting time whenever a path change is made
 
 // Stats
-#define MAX_SNAPSHOTS 100 // The max number fo snapshot to keep
+#define MAX_SNAPSHOTS 100 // TODO Fix - The max number fo snapshot to keep
 
 /* eBPF definitions */
 #ifndef __section
@@ -43,7 +43,7 @@
 
 #define SEC(NAME) __attribute__((section(NAME), used))
 
-//#define DEBUG
+//#define DEBUG 1
 #ifdef  DEBUG
 /* Only use this for debug output. Notice output from bpf_trace_printk()
  *  * end-up in /sys/kernel/debug/tracing/trace_pipe
