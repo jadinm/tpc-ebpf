@@ -6,15 +6,11 @@
 struct flow_infos {
 	__u32 srh_id;
 	__u64 last_move_time;
-	__u64 wait_backoff_max; // current max wating time
-	__u64 wait_before_move; // current waiting time
 	__u64 rtt_count; // Count the number of RTT in the connection, this is useful to know if congestion signals are consecutive or not
-	__u32 ecn_count; // Count the number of consecutive CWR sent (either from ECN or other causes)
-	__u64 last_ecn_rtt; // The index of the last RTT were we sent an CWR
 	__u32 exp3_last_number_actions;
 	__u32 exp3_curr_reward;
-	__u32 exp3_start_snd_nxt; // The reward is computed with the number of bytes exchanged during an amount of time
 	__u32 unstable; // Whether the path is stable or not
+	__u64 last_unstable_rtt;
 	floating exp3_last_probability;
 	floating exp3_weight[MAX_SRH_BY_DEST];
 } __attribute__((packed));
@@ -117,6 +113,7 @@ static void exp3_reward_path(struct flow_infos *flow_info, struct dst_infos *dst
 	// Compute new reward
 	bpf_to_floating(flow_info->exp3_curr_reward, 0, 1, &reward, sizeof(floating));
 	bpf_to_floating(flow_info->exp3_last_number_actions, 1, 0, &nbr_actions, sizeof(floating));
+	bpf_debug("max_reward %u vs flow_info->exp3_curr_reward %u\n", dst_infos->max_reward, flow_info->exp3_curr_reward);
 
 	set_floating(operands[0], reward);
 	set_floating(operands[1], max_reward);
