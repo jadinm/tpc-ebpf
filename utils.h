@@ -24,6 +24,7 @@
 #define MAX_FLOWS		1024
 #define MAX_SRH_BY_DEST 8
 #define MAX_SEGS_NBR	10
+#define MAX_EXPERTS MAX_SRH_BY_DEST + 2 // one expert telling 100% on a single path + one expert changing randomly + one random expert + one expert always stable
 
 #define WAIT_BACKOFF 2 // Multiply by two the waiting time whenever a path change is made
 
@@ -109,6 +110,19 @@ struct flow_tuple {
 	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) { \
 		(value).mantissa = (flow_infos)->exp3_weight[idx].mantissa; \
 		(value).exponent = (flow_infos)->exp3_weight[idx].exponent; \
+	}
+
+
+#define exp4_weight_set(flow_infos, idx, value) \
+	if (idx >= 0 && idx <= MAX_EXPERTS - 1) {\
+		(flow_infos)->exp4_weight[idx].mantissa = (value).mantissa; \
+		(flow_infos)->exp4_weight[idx].exponent = (value).exponent; \
+	}
+
+#define exp4_weight_get(flow_infos, idx, value) \
+	if (idx >= 0 && idx <= MAX_EXPERTS - 1) { \
+		(value).mantissa = (flow_infos)->exp4_weight[idx].mantissa; \
+		(value).exponent = (flow_infos)->exp4_weight[idx].exponent; \
 	}
 
 static void get_flow_id_from_sock(struct flow_tuple *flow_id, struct bpf_sock_ops *skops)
