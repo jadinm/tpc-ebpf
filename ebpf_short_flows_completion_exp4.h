@@ -8,6 +8,10 @@
 #define MAX_WEIGHT(x) bpf_to_floating(64, 0, 1, x, sizeof(floating))
 #define MAX_WEIGHT_EXP BIAS + 6 // 64
 
+#define MIN_DOUBLE_EXP BIAS - 200 // 64
+#define MIN_DOUBLE(x) x.mantissa = LARGEST_BIT; \
+					  x.exponent = MIN_DOUBLE_EXP;
+
 struct flow_infos {
 	__u32 srh_id;
 	__u64 rtt_count; // Count the number of RTT in the connection, this is useful to know if congestion signals are consecutive or not
@@ -92,7 +96,7 @@ static void take_snapshot(struct bpf_elf_map *st_map, struct dst_infos *dst_info
 	}
 	if (arg.new_snapshot) {
 		memcpy(&arg.new_snapshot->dest, &dst_info->dest, sizeof(struct ip6_addr_t));
-		memcpy(arg.new_snapshot->exp4_weight, dst_info->exp4_weight, sizeof(floating) * MAX_EXPERTS);
+		memcpy(arg.new_snapshot->exp4_weight, dst_info->exp4_weight, sizeof(dst_info->exp4_weight));
 		arg.new_snapshot->sequence = arg.max_seq + 1;
 		arg.new_snapshot->time = bpf_ktime_get_ns();
 		arg.new_snapshot->srh_id = flow_info->srh_id;
@@ -101,6 +105,8 @@ static void take_snapshot(struct bpf_elf_map *st_map, struct dst_infos *dst_info
 		else
 			arg.new_snapshot->reward = -1 * ((__s32) flow_info->exp4_curr_loss);
 
+		bpf_debug("HERE-SNAPSHOT-DEST (size %d) 0x%llx exp 0x%x\n", sizeof(dst_info->exp4_weight), dst_info->exp4_weight[MAX_SRH_BY_DEST].mantissa, dst_info->exp4_weight[MAX_SRH_BY_DEST].exponent); // TODO Remove
+		bpf_debug("HERE-SNAPSHOT (size %d) 0x%llx exp 0x%x\n", sizeof(floating) * MAX_EXPERTS, arg.new_snapshot->exp4_weight[MAX_SRH_BY_DEST].mantissa, arg.new_snapshot->exp4_weight[MAX_SRH_BY_DEST].exponent); // TODO Remove
 		bpf_map_update_elem(st_map, &arg.best_idx, arg.new_snapshot, BPF_ANY);
 	} else {
 		bpf_debug("HERE STAT FAIL\n");
@@ -141,11 +147,11 @@ static inline void update_weight(struct flow_infos *flow_info, struct dst_infos 
 		bpf_debug("HERE-new-weight-x %u 0x%llx exp 0x%x\n", idx, float_tmp.mantissa, float_tmp.exponent); // TODO Remove
 
 		// We bound the weight between [0.25, 64] to prevent explosion
-		if (float_tmp.exponent < MIN_WEIGHT_EXP) {
+		/*if (float_tmp.exponent < MIN_WEIGHT_EXP) {
 			MIN_WEIGHT(&float_tmp);
 		} else if (float_tmp.exponent >= MAX_WEIGHT_EXP) {
 			MAX_WEIGHT(&float_tmp);
-		}
+		}*/
 		bpf_floating_to_u32s(&float_tmp, sizeof(floating), (__u64 *) decimal, sizeof(decimal)); // TODO Remove
 		bpf_debug("HERE-new-weight (after bounds) %u %llu.%llu\n", idx, decimal[0], decimal[1]); // TODO Remove
 		bpf_debug("HERE-new-weight-x (after bounds) %u 0x%llx exp 0x%x\n", idx, float_tmp.mantissa, float_tmp.exponent); // TODO Remove
@@ -244,6 +250,36 @@ static void exp4_loss_path(struct flow_infos *flow_info, struct dst_infos *dst_i
 
 		update_weight(flow_info, dst_infos, factor_unstability_expert, MAX_SRH_BY_DEST + 1);
 	}
+
+	// Divide all weights by a big constant value
+	struct srh_record_t *srh_record = NULL;
+	MIN_DOUBLE(operands[0]);
+	for (__u32 i = 0; i <= MAX_EXPERTS - 1; i++) {
+		int xxx = i; // Compiler cannot unroll otherwise
+		if (i <= MAX_SRH_BY_DEST - 1) {
+			srh_record = &dst_infos->srhs[i];
+
+			// Wrong SRH ID -> might be inconsistent state, so skip
+			// Not a valid SRH for the destination
+			// Same SRH
+			if (!srh_record || !srh_record->srh.type) {  // 1
+				//bpf_debug("Cannot find the SRH entry indexed at %d at a dest entry\n", i);
+				continue;
+			}
+
+			if (!srh_record->is_valid) {  // 1
+				//bpf_debug("SRH entry indexed at %d by the dest entry is invalid\n", i);
+				continue; // Not a valid SRH for the destination
+			}
+		} // else an expert not depending on a particular path
+
+		exp4_weight_get(dst_infos, xxx, operands[1]);
+		//bpf_debug("HERE %llu %u\n", operands[1].mantissa, operands[1].exponent); // TODO Remove
+		//bpf_floating_to_u32s(&operands[1], sizeof(floating), (__u64 *) decimal, sizeof(decimal)); // TODO Remove
+		//bpf_debug("HERE-2 %llu.%llu\n", decimal[0], decimal[1]); // TODO Remove
+		bpf_floating_multiply(operands, sizeof(floating) * 2, &float_tmp, sizeof(floating));
+		exp4_weight_set(dst_infos, xxx, float_tmp);
+	}
 }
 
 static __u32 exp4_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_info, __u32 *dst_addr)
@@ -255,12 +291,15 @@ static __u32 exp4_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_
 			distrib[path] = 0.0
 			for i, expert in enumerate(experts):
 				distrib[path] += (weights[i] / theSum) * expectation(expert, path)
+			distrib[path] = (1 - gamma) * distrib[path] + gamma / nbr_paths
 
 		return weighted_random_choice(distrib)
 	*/
 	floating operands[2];
 	floating gamma;
 	GAMMA(gamma);
+	floating one_minus_gamma;
+	ONE_MINUS_GAMMA(one_minus_gamma);
 
 	__u32 decimal[2];
 	decimal[0] = 0;
@@ -318,6 +357,14 @@ static __u32 exp4_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_
 	floating valid_paths_minus_one;
 	bpf_to_floating(nbr_valid_paths - 1, 0, 1, &valid_paths_minus_one, sizeof(floating));
 
+	// Produce gamma exploration probability
+	floating exploration_probability;
+	set_floating(operands[0], gamma);
+	set_floating(operands[1], valid_paths);
+	bpf_floating_divide(operands, sizeof(floating) * 2, &exploration_probability, sizeof(floating));
+	bpf_floating_to_u32s(&exploration_probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));
+	bpf_debug("HERE-exploration_probability %llu.%llu\n", decimal[0], decimal[1]); // TODO Remove
+
 	// Produce stable probability (to be applied if same path)
 	floating stable_probability;
 	exp4_weight_get(dst_infos, MAX_SRH_BY_DEST, stable_probability);
@@ -364,11 +411,15 @@ static __u32 exp4_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_
 			set_floating(operands[1], unstable_probability);
 			bpf_floating_add(operands, sizeof(floating) * 2, &probability, sizeof(floating));
 			bpf_debug("HERE-probability 1 last_probability-x mant 0x%llx exp 0x%x\n", probability.mantissa, probability.exponent); // TODO Remove
+			bpf_floating_to_u32s(&probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));
+			bpf_debug("HERE-probability 1 %llu.%llu\n", decimal[0], decimal[1]); // TODO Remove
 		} else { // Add the stable expert probability
 			set_floating(operands[0], probability);
 			set_floating(operands[1], stable_probability);
 			bpf_floating_add(operands, sizeof(floating) * 2, &probability, sizeof(floating));
 			bpf_debug("HERE-probability 2 last_probability-x mant 0x%llx exp 0x%x\n", probability.mantissa, probability.exponent); // TODO Remove
+			bpf_floating_to_u32s(&probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));
+			bpf_debug("HERE-probability 2 %llu.%llu\n", decimal[0], decimal[1]); // TODO Remove
 		}
 
 		// Divide by the sum of weights
@@ -376,6 +427,24 @@ static __u32 exp4_next_path(struct bpf_elf_map *dt_map, struct flow_infos *flow_
 		set_floating(operands[1], sum);
 		bpf_floating_divide(operands, sizeof(floating) * 2, &probability, sizeof(floating));
 		bpf_debug("HERE-probability 3 last_probability-x mant 0x%llx exp 0x%x\n", probability.mantissa, probability.exponent); // TODO Remove
+		bpf_floating_to_u32s(&probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));
+		bpf_debug("HERE-probability 3 %llu.%llu\n", decimal[0], decimal[1]); // TODO Remove
+
+		// Multiply by 1-gamma
+		set_floating(operands[0], probability);
+		set_floating(operands[1], one_minus_gamma);
+		bpf_floating_multiply(operands, sizeof(floating) * 2, &probability, sizeof(floating));
+		bpf_debug("HERE-probability 4 last_probability-x mant 0x%llx exp 0x%x\n", probability.mantissa, probability.exponent); // TODO Remove
+		bpf_floating_to_u32s(&probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));
+		bpf_debug("HERE-probability 4 %llu.%llu\n", decimal[0], decimal[1]); // TODO Remove
+
+		// Add gamma exploration
+		set_floating(operands[0], probability);
+		set_floating(operands[1], exploration_probability);
+		bpf_floating_add(operands, sizeof(floating) * 2, &probability, sizeof(floating));
+		bpf_debug("HERE-probability 5 last_probability-x mant 0x%llx exp 0x%x\n", probability.mantissa, probability.exponent); // TODO Remove
+		bpf_floating_to_u32s(&probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));
+		bpf_debug("HERE-probability 5 %llu.%llu\n", decimal[0], decimal[1]); // TODO Remove
 
 		// Pick the path or continue
 		bpf_floating_to_u32s(&probability, sizeof(floating), (__u64 *) decimal, sizeof(decimal));

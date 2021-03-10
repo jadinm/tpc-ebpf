@@ -98,6 +98,9 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	switch (op) {
 		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: // Call EXP4 for servers (because setting the SRH for request socks does not work)
 			bpf_debug("passive established\n");
+			bpf_debug("%u\n", skops->rcv_nxt); // TODO Remove
+			bpf_debug("%u\n", skops->snd_nxt); // TODO Remove
+			bpf_debug("HHHHHHHHHHHHHHHHH\n");
 			flow_info->srh_id = exp4_next_path(&short_dest_map, flow_info, flow_id.remote_addr);
 			dst_infos = (void *)bpf_map_lookup_elem(&short_dest_map, flow_id.remote_addr);
 			if (dst_infos) {
