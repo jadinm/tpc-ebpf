@@ -17,6 +17,7 @@
 #define ETH_HLEN 		14 /* Ethernet hdr length */
 #define TCP_MAXSEG		2 /* Limit/Retrieve MSS */
 #define TCP_CONGESTION  13 /* Change congestion control */
+#define TCP_PATH_CHANGED 38 /* Notify TCP that kernel changed */
 // #define DEBUG 			1
 #define PIN_NONE		0
 #define PIN_GLOBAL_NS	2
