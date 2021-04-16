@@ -58,13 +58,14 @@ static int move_path(struct bpf_elf_map *dst_map, void *id, __u32 key, struct bp
 
 		if (!rv) {
 			// Reset congestion control
+			// TODO This removes the estimation of the RTT and puts a timeout of 1 seconds by default
 			// It will do nothing if there is no actual change...
 			// The problem is that it does not reset the retransmission timeout...
-			rv = bpf_getsockopt(skops, SOL_TCP, TCP_CONGESTION, cc, sizeof(cc));
-			if (!rv) { // TODO Handle case with reno as base congestion control
-				rv = bpf_setsockopt(skops, SOL_TCP, TCP_CONGESTION, tmp_cc, sizeof(tmp_cc));
-				rv = bpf_setsockopt(skops, SOL_TCP, TCP_CONGESTION, cc, sizeof(cc));
-			}
+			//rv = bpf_getsockopt(skops, SOL_TCP, TCP_CONGESTION, cc, sizeof(cc));
+			//if (!rv) { // TODO Handle case with reno as base congestion control
+			//	rv = bpf_setsockopt(skops, SOL_TCP, TCP_CONGESTION, tmp_cc, sizeof(tmp_cc));
+			//	rv = bpf_setsockopt(skops, SOL_TCP, TCP_CONGESTION, cc, sizeof(cc));
+			//}
 			if (!rv) {
 				rv = bpf_setsockopt(skops, SOL_TCP, TCP_PATH_CHANGED, &val, sizeof(val));
 				bpf_debug("Set Path changed - returned %u\n", rv);
@@ -115,20 +116,9 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			return 1;
 		}
 		flow_info = (void *) bpf_map_lookup_elem(&conn_map, &flow_id);
-		if (flow_info) {
-			flow_info->srh_id = 0;
-			move_path(&dest_map, flow_id.remote_addr, flow_info->srh_id, skops);
-			rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
-			if (rv)
-				return 1;
-
-			take_snapshot(&stat_map, flow_info, &flow_id);
-
-			bpf_sock_ops_cb_flags_set(skops, (BPF_SOCK_OPS_RETRANS_CB_FLAG|BPF_SOCK_OPS_RTO_CB_FLAG|BPF_SOCK_OPS_RTT_CB_FLAG|BPF_SOCK_OPS_STATE_CB_FLAG));
-			skops->reply = rv;
-			return 0;
+		if (!flow_info) {
+			return 1;
 		}
-		return 1;
 	}
 
 	switch ((int) skops->op) {
@@ -137,7 +127,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			break;
 		case BPF_SOCK_OPS_DUPACK:
 			flow_info->retrans_count += 1;
-			bpf_debug("Duplicated ack: nbr %llu for %llu\n", flow_info->retrans_count, skops->rcv_nxt);
+			//bpf_debug("Duplicated ack: nbr %llu for %llu\n", flow_info->retrans_count, skops->rcv_nxt);
 
 			if (flow_info->last_rcv_nxt != skops->rcv_nxt) { // Data was acked so issue was solved
 				flow_info->last_rcv_nxt = skops->rcv_nxt;
@@ -154,28 +144,30 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			__u32 key_dup = 0; // This assumes that SRH 0 is always valid
 			struct dst_infos *dst_infos_dup = (void *) bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 			key_dup = inner_loop(flow_info->srh_id, dst_infos_dup);
-			bpf_debug("DUP ACK - Change path to %u\n", key_dup);
+			//bpf_debug("DUP ACK - Change path to %u\n", key_dup);
 
 			if (key_dup == flow_info->srh_id) {
 				goto update; // This can't be helped
 			}
 
 			// Move to the next path
+			bpf_debug("DUP ACK - Change path to %u\n", key_dup);
 			rv = move_path(&dest_map, flow_id.remote_addr, key_dup, skops);
 			if (!rv) {
 				// Update flow informations
 				flow_info->srh_id = key_dup;
 				flow_info->last_move_time = cur_time;
 				flow_info->retrans_count = 0;
-				bpf_debug("DUP ACK - Path changed to %u\n", key_dup);
+				//bpf_debug("DUP ACK - Path changed to %u\n", key_dup);
 			}
 			take_snapshot(&stat_map, flow_info, &flow_id);
 			break;
 		case BPF_SOCK_OPS_TCP_CONNECT_CB:
-			bpf_debug("active established\n");
-			break;
+			bpf_debug("active SYN sent\n");
+			// XXX No break; here
 		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: // Call EXP4 for servers (because setting the SRH for request socks does not work)
-			bpf_debug("passive established\n");
+			if (skops->op == BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB)
+				bpf_debug("passive established\n");
 			flow_info = (void *) bpf_map_lookup_elem(&conn_map, &flow_id);
 			if (flow_info) {
 				flow_info->srh_id = 0;
@@ -194,6 +186,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		case BPF_SOCK_OPS_STATE_CB: // Change in the state of the TCP CONNECTION
 			// This flow is closed, cleanup the maps
 			if (skops->args[1] == BPF_TCP_CLOSE) {
+				bpf_debug("Close\n");
 				// Delete the flow from the flows map
 				// take_snapshot(&stat_map, flow_info, &flow_id);
 				bpf_map_delete_elem(&conn_map, &flow_id);
@@ -204,8 +197,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			// TODO So the server also needs this program (or a single-side cut)...
 			// TODO But it won't work if the server is only acking because no eBPF is made...
 			flow_info->retrans_count += 1;
-			bpf_debug("Retransmission timeout: nbr %llu for %llu\n", flow_info->retrans_count, skops->snd_una);
-			bpf_debug("Params: %u %u %u\n", skops->args[0], skops->args[1], skops->args[2]);
+			//bpf_debug("Retransmission timeout: nbr %llu for %llu\n", flow_info->retrans_count, skops->snd_una);
+			//bpf_debug("Params: %u %u %u\n", skops->args[0], skops->args[1], skops->args[2]);
 
 			if (flow_info->last_snd_una != skops->snd_una) { // Data was acked so issue was solved
 				flow_info->last_snd_una = skops->snd_una;
@@ -222,20 +215,21 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			__u32 key = 0; // This assumes that SRH 0 is always valid
 			struct dst_infos *dst_infos = (void *) bpf_map_lookup_elem(&dest_map, flow_id.remote_addr);
 			key = inner_loop(flow_info->srh_id, dst_infos);
-			bpf_debug("RTO - Change path to %u\n", key);
+			//bpf_debug("RTO - Change path to %u\n", key);
 
 			if (key == flow_info->srh_id) {
 				goto update; // This can't be helped
 			}
 
 			// Move to the next path
+			bpf_debug("RTO - Change path to %u\n", key);
 			rv = move_path(&dest_map, flow_id.remote_addr, key, skops);
 			if (!rv) {
 				// Update flow informations
 				flow_info->srh_id = key;
 				flow_info->last_move_time = cur_time;
 				flow_info->retrans_count = 0;
-				bpf_debug("RTO - Path changed to %u\n", key);
+				//bpf_debug("RTO - Path changed to %u\n", key);
 			}
 			take_snapshot(&stat_map, flow_info, &flow_id);
 update:
