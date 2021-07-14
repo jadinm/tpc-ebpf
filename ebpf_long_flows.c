@@ -140,24 +140,28 @@ int handle_sockop(struct bpf_sock_ops *skops)
 				// Flow respecting requirement
 				flow_info->unstable = 0;
 				flow_info->last_unstable_rtt = flow_info->rtt_count;
-				goto update;
+				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				break;
 			}
 
 			if (flow_info->last_move_time + WAIT_BEFORE_INITIAL_MOVE > cur_time) {
 				// Still warming up on this path
-				goto update;
+				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				break;
 			}
 			if (!flow_info->unstable) {
 				// Mark as unstable
 				bpf_debug("Mark unstable\n");
 				flow_info->unstable = 1;
 				flow_info->last_unstable_rtt = flow_info->rtt_count;
-				goto update;
+				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				break;
 			}
 			if (flow_info->last_unstable_rtt + WAIT_UNSTABLE_RTT > flow_info->rtt_count) {
 				// Not unstable for long enough
 				bpf_debug("Not unstable long enough\n");
-				goto update;
+				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				break;
 			}
 			// Acting on instability
 			bpf_debug("Sufficient unstability\n");
@@ -167,7 +171,9 @@ int handle_sockop(struct bpf_sock_ops *skops)
 			take_snapshot(&stat_map, flow_info, &flow_id); // Even if it doesn't change, we want to know
 
 			if (key == flow_info->srh_id) {
-				goto update; // This can't be helped
+				// This can't be helped
+				rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
+				break;
 			}
 
 			// Move to the next path
@@ -177,7 +183,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 				flow_info->srh_id = key;
 				flow_info->last_move_time = cur_time;
 			}
-update:
 			rv = bpf_map_update_elem(&conn_map, &flow_id, flow_info, BPF_ANY);
 			break;
 	}

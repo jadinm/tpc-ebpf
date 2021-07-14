@@ -3,9 +3,11 @@
 
 #include "utils.h"
 
+#define MIN_TIME_BEFORE_MOVING_NS 700000000UL // ns -> 700ms
+
 struct flow_infos {
 	__u32 srh_id;
-	__u64 last_move_time;
+	__u64 last_move_time; // == min(time of last RTT, time of last path change)
 	__u64 rtt_count;
 	__u32 retrans_count;
 	__u64 last_rcv_nxt;
@@ -76,7 +78,6 @@ static void take_snapshot(struct bpf_elf_map *st_map, struct flow_infos *flow_in
 			}
 		}
 	}
-	//bpf_debug("SNAP at index %u - %u -> %u\n", arg.best_idx, flow_id->local_port, flow_id->remote_port);
 	if (arg.new_snapshot) {
 		memcpy(&arg.new_snapshot->flow, flow_info, sizeof(struct flow_infos));
 		memcpy(&arg.new_snapshot->flow_id, flow_id, sizeof(struct flow_tuple));
@@ -104,7 +105,7 @@ struct bpf_elf_map SEC("maps") dest_map = {
 };
 
 struct bpf_elf_map SEC("maps") stat_map = {
-	.type		= BPF_MAP_TYPE_PERCPU_ARRAY,
+	.type		= BPF_MAP_TYPE_ARRAY,
 	.size_key	= sizeof(__u32),
 	.size_value	= sizeof(struct flow_snapshot),
 	.pinning	= PIN_NONE,
