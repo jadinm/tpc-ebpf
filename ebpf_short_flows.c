@@ -91,7 +91,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		return 1;
 	}
 
-	bpf_debug("operation: %d\n", op);
+	//bpf_debug("operation: %d\n", op);
 	//bpf_debug("snd_una: %lu rate : %lu interval: %lu\n", skops->snd_una, skops->rate_delivered, skops->rate_interval_us);
 	switch (op) {
 		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: // Call EXP3 for servers (because setting the SRH for request socks does not work)

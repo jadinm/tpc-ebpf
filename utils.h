@@ -45,7 +45,7 @@
 
 #define SEC(NAME) __attribute__((section(NAME), used))
 
-//#define DEBUG 1
+#define DEBUG 1
 #ifdef  DEBUG
 /* Only use this for debug output. Notice output from bpf_trace_printk()
  *  * end-up in /sys/kernel/debug/tracing/trace_pipe
@@ -100,6 +100,11 @@ struct flow_tuple {
 	__u32 remote_port;	
 } __attribute__((packed));
 
+#define exp3_weight_reset(flow_infos, idx) \
+	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) {\
+		(flow_infos)->exp3_weight[idx].mantissa = LARGEST_BIT; \
+		(flow_infos)->exp3_weight[idx].exponent = BIAS; \
+	}
 
 #define exp3_weight_set(flow_infos, idx, value) \
 	if (idx >= 0 && idx <= MAX_SRH_BY_DEST - 1) {\
