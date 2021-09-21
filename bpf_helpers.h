@@ -240,6 +240,10 @@ static int (*bpf_floating_divide)(floating *operands, __u32 operands_len, floati
 	(void *) BPF_FUNC_floating_divide;
 static int (*bpf_floating_e_power_a)(floating *exponent, __u32 exponent_len, floating *result, __u32 result_len) =
 	(void *) BPF_FUNC_floating_e_power_a;
+static int (*bpf_start_timer)(void *ctx, __u64 duration) =
+	(void *) BPF_FUNC_start_timer;
+static int (*bpf_send_ack)(void *ctx) =
+	(void *) BPF_FUNC_send_ack;
 
 /* llvm builtin functions that eBPF C program may use to
  * emit BPF_LD_ABS and BPF_LD_IND instructions
