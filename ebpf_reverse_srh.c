@@ -53,7 +53,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	}
 
 	switch (op) {
-        case BPF_TCP_SYN_SENT:
+        case BPF_SOCK_OPS_TCP_CONNECT_CB:
         case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
             val = 1;
             rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RECVRTHDR, &val, sizeof(int));
