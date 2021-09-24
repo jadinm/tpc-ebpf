@@ -82,7 +82,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 		if (flow_info) {
 			dst_infos = (void *) bpf_map_lookup_elem(&short_dest_map, flow_id.remote_addr);
 			if (dst_infos) {
-				bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_ALL_CB_FLAGS);
 				skops->reply = rv;
 				//bpf_debug("HERE flow created %d\n", BPF_SOCK_OPS_ALL_CB_FLAGS);
 				return 0;
@@ -94,10 +93,16 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	//bpf_debug("operation: %d\n", op);
 	//bpf_debug("snd_una: %lu rate : %lu interval: %lu\n", skops->snd_una, skops->rate_delivered, skops->rate_interval_us);
 	switch (op) {
+		case 1000:
+			bpf_debug("WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOORKING %u - %llu\n", skops->op, cur_time);
+			break;
+		// TODO Case for SYN SENT
 		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: // Call EXP3 for servers (because setting the SRH for request socks does not work)
-			bpf_debug("passive established\n");
+			//bpf_debug("passive established\n");
 			flow_info->srh_id = exp3_next_path(&short_dest_map, flow_info, flow_id.remote_addr);
 			dst_infos = (void *)bpf_map_lookup_elem(&short_dest_map, flow_id.remote_addr);
+			rv = bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_ALL_CB_FLAGS);
+			bpf_debug("Set flags %lld\n", rv);
 			if (dst_infos) {
 				move_path(dst_infos, flow_info->srh_id, skops);
 				flow_info->exp3_start_snd_nxt = skops->snd_nxt;
@@ -107,6 +112,8 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 				rv = bpf_map_update_elem(&short_conn_map, &flow_id, flow_info, BPF_ANY);
 			}
+			//bpf_debug("BEFORE START TIMER %llu\n", cur_time);
+			//bpf_start_timer(skops, 10);
 			break;
 		case BPF_SOCK_OPS_STATE_CB: // Change in the state of the TCP CONNECTION
 			// This flow is closed, cleanup the maps

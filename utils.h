@@ -33,17 +33,11 @@
 #define MAX_SNAPSHOTS 100 // TODO Fix - The max number fo snapshot to keep
 
 /* eBPF definitions */
-#ifndef __section
-# define __section(NAME)                  \
-   __attribute__((section(NAME), used))
-#endif
 
 #ifndef __inline
 # define __inline                         \
    inline __attribute__((always_inline))
 #endif
-
-#define SEC(NAME) __attribute__((section(NAME), used))
 
 #define DEBUG 1
 #ifdef  DEBUG
