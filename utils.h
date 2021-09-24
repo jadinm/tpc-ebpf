@@ -17,7 +17,7 @@
 #define ETH_HLEN 		14 /* Ethernet hdr length */
 #define TCP_MAXSEG		2 /* Limit/Retrieve MSS */
 #define TCP_CONGESTION  13 /* Change congestion control */
-#define TCP_PATH_CHANGED 50 /* Notify TCP that kernel changed */
+#define TCP_PATH_CHANGED 38 /* Notify TCP that kernel changed */
 #define IPV6_RECVRTHDR	56	/* Trigger the save of the SRH */
 #define NEXTHDR_ROUTING		43	/* Routing header. */
 // #define DEBUG 			1
