@@ -16,7 +16,7 @@ static int move_path(struct ip6_srh_t *srh, struct bpf_sock_ops *skops)
 {
     srh->nexthdr = 0; // TODO Useful ?
 	int rv = bpf_setsockopt(skops, SOL_IPV6, IPV6_RTHDR, srh, sizeof(*srh));
-    bpf_debug("bpf_setsockopt !!!!! %d\n", rv);
+    //bpf_debug("bpf_setsockopt !!!!! %d\n", rv);
     if (rv) {
         bpf_debug("optval %p - optlen %llu\n", srh, sizeof(*srh));
         bpf_debug("optlen %llu - header_len %u\n", sizeof(*srh), (srh->hdrlen+1) << 3);
@@ -60,7 +60,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
                 // TODO Print Received SRH
                 ip6 = (struct ipv6hdr *) skops->skb_data;
 	            if (ip6 + 1 <= skops->skb_data_end && ip6->nexthdr == NEXTHDR_ROUTING) {
-                    bpf_debug("IP version %d\n", ip6->version);
+                    //bpf_debug("IP version %d\n", ip6->version);
                     skb_srh = (struct ip6_srh_t *) (ip6 + 1);
                     if (((void *) (skb_srh + 1)) - sizeof(reversed_srh.segments) <= skops->skb_data_end && skb_srh->type == 4) {
                         // There is a routing extension header that is readable
