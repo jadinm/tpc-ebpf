@@ -7,6 +7,7 @@
 #define KBUILD_MODNAME "EBPF REVERSE SRH"
 #include <asm/byteorder.h>
 #include <uapi/linux/bpf.h>
+#include "bpf_endian.h"
 #include "kernel.h"
 #include "ebpf_reverse_srh.h"
 
@@ -24,11 +25,6 @@ static int move_path(struct ip6_srh_t *srh, struct bpf_sock_ops *skops)
         bpf_debug("max_last_entry %u\n", (srh->hdrlen / 2) - 1);
     }
 	return !!rv;
-}
-
-static int reverse_srh(struct bpf_sock_ops *skops, struct ip6_srh_t *skb_srh, struct ip6_srh_t *reversed_srh)
-{
-    
 }
 
 SEC("sockops")

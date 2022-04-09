@@ -20,6 +20,8 @@
 #define TCP_PATH_CHANGED 38 /* Notify TCP that kernel changed */
 #define IPV6_RECVRTHDR	56	/* Trigger the save of the SRH */
 #define NEXTHDR_ROUTING		43	/* Routing header. */
+#define IPV6_UNICAST_HOPS	16	/* Hop limit */
+#define ICMPV6_TIME_EXCEEDED	3 /* ICMPv6 Time Exceeded */
 // #define DEBUG 			1
 #define PIN_NONE		0
 #define PIN_GLOBAL_NS	2

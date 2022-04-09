@@ -93,10 +93,7 @@ int handle_sockop(struct bpf_sock_ops *skops)
 	//bpf_debug("operation: %d\n", op);
 	//bpf_debug("snd_una: %lu rate : %lu interval: %lu\n", skops->snd_una, skops->rate_delivered, skops->rate_interval_us);
 	switch (op) {
-		case 1000:
-			bpf_debug("WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOORKING %u - %llu\n", skops->op, cur_time);
-			break;
-		// TODO Case for SYN SENT
+		// TODO Case for SYN SENT (need to not return when creating the new flow info)
 		case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: // Call EXP3 for servers (because setting the SRH for request socks does not work)
 			//bpf_debug("passive established\n");
 			flow_info->srh_id = exp3_next_path(&short_dest_map, flow_info, flow_id.remote_addr);
@@ -112,8 +109,6 @@ int handle_sockop(struct bpf_sock_ops *skops)
 
 				rv = bpf_map_update_elem(&short_conn_map, &flow_id, flow_info, BPF_ANY);
 			}
-			//bpf_debug("BEFORE START TIMER %llu\n", cur_time);
-			//bpf_start_timer(skops, 10);
 			break;
 		case BPF_SOCK_OPS_STATE_CB: // Change in the state of the TCP CONNECTION
 			// This flow is closed, cleanup the maps
