@@ -1,7 +1,8 @@
 SRC=$(wildcard *.c)
 OBJ=$(SRC:.c=.o)
-CFLAGS=-fno-stack-protector 
-KERNEL_SOURCES=/root/ebpf_hhf_kernel/  # Replace this by the compiled kernel source folder
+CFLAGS=-fno-stack-protector
+# Replace this by the compiled kernel source folder
+KERNEL_SOURCES=/root/ebpf_hhf_kernel/
 
 all: $(SRC) $(OBJ)
 
